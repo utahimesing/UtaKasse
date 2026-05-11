@@ -1,16 +1,73 @@
-# React + Vite
+# UtaKasse
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+UtaKasse is an offline-first bookkeeping and checkout web app built with React + Vite.
+Data is stored in the browser (IndexedDB via Dexie), and supports Google Drive backup/restore.
 
-Currently, two official plugins are available:
+## Quick Start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### 1) Install dependencies
 
-## React Compiler
+```bash
+npm install
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 2) Configure environment variables
 
-## Expanding the ESLint configuration
+Create a `.env` file in project root and set:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+```
+
+You can copy from `.env.example`.
+
+### 3) Start dev server
+
+```bash
+npm run dev
+```
+
+### 4) Build for production
+
+```bash
+npm run build
+```
+
+## Security Rules (Important)
+
+- Never commit `.env`, secrets, OAuth credentials JSON, private keys, or certificates.
+- Never include real customer data in repository, screenshots, or demo exports.
+- Treat exposed credentials as compromised: rotate/revoke immediately.
+- Keep dependencies patched and run `npm audit` before release.
+
+## Pre-Publish Checklist
+
+- `npm run build` passes
+- `npm audit` shows no high/critical vulnerabilities
+- No secret files in working tree (e.g. `.env`, `*.pem`, `*.key`, credential JSON)
+- Google OAuth uses `VITE_GOOGLE_CLIENT_ID` only (no `client_secret` in frontend code)
+
+## Minimal Smoke Test Checklist
+
+Run this flow after each significant change:
+
+1. Add product
+2. Checkout
+3. Export report
+4. Backup to Google Drive
+5. Restore from backup and verify records
+
+## Demo Data and Privacy
+
+- Use anonymized/fake data for demos.
+- Do not use real phone numbers, transaction notes, or user identifiers in shared backup files.
+- If sharing backup JSON externally, review and sanitize first.
+
+## Versioning
+
+- Recommended tag format: `vMAJOR.MINOR.PATCH`
+- First release tag for this project: `v1.0.0`
+
+## License
+
+MIT License. See `LICENSE`.
