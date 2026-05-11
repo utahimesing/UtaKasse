@@ -1,0 +1,4 @@
+﻿name,price,stock,categories,color,isNew,imageUrl,archived
+範例商品1,100,10,類別A,#E8B4B0,false,,false
+範例商品2,300,5,類別A;類別B,#8EBFAD,true,,false
+範例商品3,500,,類別B,#C9A8F5,false,,false

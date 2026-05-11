@@ -1,0 +1,3 @@
+﻿event_id,order_id,buyer_name,phone_last5,item_name,item_qty,unit_price,total_price,paid_amount
+evt-01,A0001,範例買家1,00001,範例商品1,1,100,100,100
+evt-01,A0002,範例買家2,00002,範例商品2,2,300,600,300

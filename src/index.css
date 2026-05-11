@@ -1,0 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800&display=swap');
+
+:root {
+  --bg:              #F7F4EA;
+  --surface:         #DED9E2;
+  --accent:          #C0B9DD;
+  --primary:         #80A1D4;
+  --primary-light:   #9BBCE8;
+  --success:         #75C9C8;
+  --success-light:   #8FD8D7;
+  --danger:          #5B4D8A;   /* Deep Periwinkle */
+  --danger-light:    rgba(220,215,240,0.60);
+  --danger-text:     #FFFFFF;
+
+  --ink:             #3D3060;
+  --muted:           #8B85A0;
+
+  /* 保留 rose 只給 Toast 錯誤訊息用 */
+  --rose:            #D96868;
+  --rose-light:      #F2A3A3;
+  --rose-dark:       #B04D4D;
+  --mint:            #75C9C8;
+  --mint-border:     #75C9C8;
+  --lavender:        #C0B9DD;
+  --lav-dark:        #80A1D4;
+
+  --glass-bg:        rgba(255,255,255,0.52);
+  --glass-border:    rgba(255,255,255,0.72);
+  --blur-lg:         blur(24px);
+  --blur-md:         blur(16px);
+  --shadow-card:     0 8px 32px rgba(128,161,212,0.18), 0 2px 8px rgba(192,185,221,0.12);
+  --shadow-primary:  0 8px 22px rgba(128,161,212,0.42);
+  --shadow-success:  0 6px 20px rgba(117,201,200,0.42);
+
+  --border:          rgba(255,255,255,0.72);
+  --success:         #4A8840;
+
+  --card-shadow-elevated: var(--shadow-card);
+
+  --radius-sm:  8px;
+  --radius-md:  14px;
+  --radius-lg:  20px;
+  --radius-xl:  28px;
+  --radius-pill:999px;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: 'DM Sans', sans-serif;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+button {
+  font-family: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+button:active:not(:disabled),
+.pressable:active {
+  transform: scale(0.96);
+}
+
+.topRef {
+  position: relative;
+  top: -10px;
+}
+
+#root {
+  position: relative;
+  z-index: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Wisteria Aurora 背景（5 層，新色系） ── */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 65% 55% at 8%   5%,  rgba(192,185,221,0.55) 0%, transparent 62%),
+    radial-gradient(ellipse 50% 45% at 92%  12%, rgba(117,201,200,0.40) 0%, transparent 58%),
+    radial-gradient(ellipse 55% 48% at 50%  90%, rgba(128,161,212,0.28) 0%, transparent 64%),
+    radial-gradient(ellipse 70% 60% at 78%  72%, rgba(192,185,221,0.30) 0%, transparent 68%),
+    radial-gradient(ellipse 40% 35% at 20%  70%, rgba(117,201,200,0.20) 0%, transparent 55%),
+    linear-gradient(158deg, #EEE9F8 0%, #E4F2F2 48%, #EEF0FA 100%);
+}
+
+/* 底部導覽樣式由 App.jsx（浮島 nav）內聯控制；勿在此對 nav 使用 !important，否則會蓋掉元件樣式 */
+
+/* ── 底部抽屜面板 ── */
+div[style*="border-radius: 28px 28px 0 0"] {
+  background: rgba(255,255,255,0.72) !important;
+  -webkit-backdrop-filter: var(--blur-lg) !important;
+  backdrop-filter: var(--blur-lg) !important;
+  border: none !important;
+  border-top: 1px solid rgba(255,255,255,0.78) !important;
+  box-shadow: 0 -8px 40px rgba(128,161,212,0.20) !important;
+}
+
+/* ── 通用磨砂面板 ── */
+.glass-sheet {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--blur-md);
+  backdrop-filter: var(--blur-md);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+}

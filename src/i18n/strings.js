@@ -1,0 +1,98 @@
+export default {
+  // App / Navigation
+  'app.title': '姬帳 UtaKasse',
+  'app.offline': '離線可用',
+  'nav.sales': '銷售',
+  'nav.preorders': '預購',
+  'nav.admin': '後台',
+  'nav.reports': '報表',
+
+  // Common
+  'common.all': '全部',
+  'common.close': '關閉',
+  'common.cancel': '取消',
+  'common.confirm': '確認',
+
+  // Sales
+  'sales.cartTitle': '購物車',
+  'sales.cartEmpty': '請點選商品加入購物車',
+  'sales.bonusTitle': '特典提醒：',
+  'sales.paymentTitle': '付款方式',
+  'sales.checkout': '結帳',
+  'sales.checkoutDone': '✓ 完成！',
+  'sales.toastDone': '結帳完成',
+  'sales.changeLabel': '找零：$',
+  'sales.totalDuePrefix': '應收: NT$',
+
+  // Numpad
+  'numpad.receivedLabel': '實收',
+  'numpad.clear': 'C',
+  'numpad.backspace': '⌫',
+
+  // Preorders
+  'preorders.filters.all': '全部',
+  'preorders.filters.pending': '未取件',
+  'preorders.filters.done': '已取件',
+  'preorders.listTitle': '預購名單',
+  'preorders.importTitle': '匯入預購 CSV',
+  'preorders.importErrors': '匯入錯誤',
+  'preorders.noData': '目前沒有預購資料。',
+  'preorders.status.pending': '未取件',
+  'preorders.status.done': '已取件',
+  'preorders.paidA': '已付清 ✅',
+  'preorders.orderLast5Label': '訂單末五碼',
+  'preorders.paidBPrefix': '收尾款: $',
+  'preorders.addonButton': '＋ 加購商品（選填）',
+  'preorders.addonTitle': '加購清單',
+  'preorders.addonEmpty': '尚未選擇加購商品',
+  'preorders.pickupTitle': '預購取件',
+  'preorders.paymentTitle': '付款方式',
+  'preorders.confirmA': '確認取件 ✅',
+  'preorders.hintA': '現場只需確認取件，不收取任何費用',
+  'preorders.finishB': '完成收款・確認取件',
+  'preorders.panelLast5Label': '末五碼',
+  'preorders.fullPaidLabel': '全額付清',
+  'preorders.fullPaidDetailPrefix': '訂金已全額付清（現場不收款）NT$',
+  'preorders.balanceDueLabel': '應收尾款',
+  'preorders.changeLabel': '找零：$',
+
+  // AdminProducts
+  'admin.title': '庫存管理',
+  'admin.newProduct': '＋ 新增商品',
+  'admin.searchPlaceholder': '搜尋商品名稱',
+  'admin.photoSection': '商品照片',
+  'admin.tapUpload': '點擊上傳',
+  'admin.noProducts': '目前沒有商品。',
+  'admin.showArchivedLabel': '顯示封存商品',
+  'admin.showSellingLabel': '顯示販售中商品',
+  'admin.showArchivedToggle': '顯示封存',
+  'admin.showSellingToggle': '顯示販售中',
+  'admin.addCategory': '新增類別',
+  'admin.categoryPlaceholder': '輸入類別名稱',
+  'admin.deleteImage': '刪除圖片',
+  'admin.deleteColor': '刪除底色',
+  'admin.colorLabel': '背景顏色（9 種預設）',
+  'admin.nameLabel': '商品名稱',
+  'admin.priceLabel': '售價（NT$）',
+  'admin.stockLabel': '庫存（留空=不限）',
+  'admin.categoryLabel': '類別（多選）',
+  'admin.newBadgeLabel': '標記新品 (NEW)',
+  'admin.archivedLabel': '封存商品',
+  'admin.editTitle': '編輯商品',
+  'admin.addTitle': '新增商品',
+  'admin.save': '儲存',
+  'admin.csv.title': '商品批量匯入',
+  'admin.csv.template': '模板下載',
+  'admin.form.cancel': '取消',
+
+  // ProductCard
+  'product.newBadge': 'NEW',
+
+  // Reports
+  'reports.title': '報表',
+  'reports.subtitle': '以 GMT+8（Asia/Taipei）日期為分檔基準',
+  'reports.todayTitle': '本日營收',
+  'reports.export': '匯出 CSV',
+  'reports.eventLabel': '活動',
+};
+
