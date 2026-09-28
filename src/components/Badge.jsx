@@ -1,29 +1,32 @@
+import { ui, border } from '../lib/uiPalette.js';
+
 /**
- * Badge / Pill 元件
- * variant: 'new' | 'stock' | 'low' | 'sold' | 'bonus' | 'category' | 'active' | 'inactive'
+ * Badge / Pill 元件（Neo-Brutalism：黑框、實色底、黑字）
+ * variant: 'new' | 'stock' | 'low' | 'sold' | 'bonus' | 'category' | 'category-active' | 'active' | 'inactive'
  * size: 'sm' | 'md'
  */
 const variants = {
-  new:      { background: 'rgba(128,161,212,0.88)', color: '#FFFFFF', border: '1px solid rgba(255,255,255,0.40)' },
-  stock:    { background: 'rgba(128,161,212,0.80)', color: '#FFFFFF', border: '1px solid rgba(255,255,255,0.35)' },
-  low:      { background: 'rgba(220,140,20,0.88)',  color: '#FFFFFF', border: '1px solid rgba(255,255,255,0.35)' },
-  sold:     { background: 'rgba(139,133,160,0.80)', color: '#FFFFFF', border: 'none' },
-  bonus:    { background: 'rgba(117,201,200,0.85)', color: '#FFFFFF', border: '1px solid rgba(255,255,255,0.40)' },
-  category: { background: 'rgba(255,255,255,0.58)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', color: '#3D3060', border: '1.5px solid rgba(255,255,255,0.70)' },
-  'category-active': { background: 'linear-gradient(135deg,#9BBCE8 0%,#80A1D4 100%)', color: '#FFFFFF', border: '1.5px solid rgba(255,255,255,0.30)', boxShadow: '0 6px 18px rgba(128,161,212,0.36)' },
-  active:   { background: 'rgba(117,201,200,0.18)', color: '#4A9A99', border: '1px solid rgba(117,201,200,0.40)' },
-  inactive: { background: 'rgba(139,133,160,0.12)', color: '#8B85A0', border: '1px solid rgba(139,133,160,0.25)' },
+  // NEW 標籤：橘底＋微旋轉（有目的的不對稱）
+  new:      { background: ui.orange,  color: ui.ink, border: border.solidSm, transform: 'rotate(-4deg)' },
+  stock:    { background: ui.white,   color: ui.ink, border: border.solidSm },
+  low:      { background: ui.apricot, color: ui.ink, border: border.solidSm },
+  sold:     { background: ui.disabledBg, color: ui.disabledText, border: `2px solid ${ui.disabledBorder}`, textDecoration: 'line-through' },
+  bonus:    { background: ui.apricot, color: ui.ink, border: border.solidSm },
+  category: { background: ui.white,   color: ui.ink, border: border.solidSm },
+  'category-active': { background: ui.apricot, color: ui.ink, border: border.solidSm },
+  active:   { background: ui.teal,    color: ui.ink, border: border.solidSm },
+  inactive: { background: ui.white,   color: ui.muted, border: border.solidSm },
 };
 
 const sizes = {
-  sm: { fontSize: 10, padding: '3px 8px',  borderRadius: 8 },
-  md: { fontSize: 12, padding: '5px 10px', borderRadius: 10 },
+  sm: { fontSize: 11, padding: '3px 8px',  borderRadius: 999 },
+  md: { fontSize: 12, padding: '5px 10px', borderRadius: 999 },
 };
 
 export default function Badge({ variant = 'stock', size = 'sm', children, style: extra }) {
   return (
     <span style={{
-      display: 'inline-block', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap',
+      display: 'inline-block', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap',
       ...sizes[size], ...variants[variant], ...extra,
     }}>
       {children}

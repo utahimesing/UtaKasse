@@ -22,7 +22,7 @@ export function calcTxKind(tx) {
   return tx?.type ?? '未知';
 }
 
-function getTxPaymentLabel(tx) {
+export function getTxPaymentLabel(tx) {
   const kind = calcTxKind(tx);
   if (kind === '預購A') return '（已付清）';
   const pm = Array.isArray(tx?.payments) ? tx.payments[0] : null;
@@ -38,7 +38,7 @@ function getTxTime(tx) {
 }
 
 function sanitizeEventNameForFile(name) {
-  const raw = String(name ?? '').trim() || '活動';
+  const raw = String(name ?? '').trim() || '場次';
   // Remove Windows-invalid filename characters
   const cleaned = raw.replace(/[\\/:*?"<>|]/g, '');
   // Replace whitespace with underscore
@@ -112,11 +112,6 @@ export function buildSummaryCsvText({ dateKey, transactions }) {
         .filter(Boolean),
     ),
   ).sort();
-
-  const productColStart = 3; // header index: 編號(0), 時間(1), 類型(2)
-  const subtotalCol = productColStart + productNames.length; // 小計
-  const paymentMethodCol = subtotalCol + 1; // 收款方式
-  const noteCol = subtotalCol + 2; // 買家/備註
 
   const header = ['編號', '時間', '類型', ...productNames, '小計', '收款方式', '買家/備註'];
   const totalCols = header.length;
@@ -284,7 +279,7 @@ export function buildSummaryCsvText({ dateKey, transactions }) {
   lines.push(fixedRow(['▸ 參考數字（非今日現場收款，不需對現金）']));
   lines.push(
     fixedRow([
-      '預購場外已付（A型，活動前已收）',
+      '預購場外已付（A型，場次前已收）',
       '',
       '',
       ...new Array(productNames.length).fill(''),
@@ -378,13 +373,29 @@ export function downloadCsv(filename, csvText) {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // 延後 revoke：手機瀏覽器需要時間開始下載，馬上 revoke 會拿不到檔案
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-export function downloadCsvFiles(files) {
-  for (const { filename, csvText } of files) {
-    downloadCsv(filename, csvText);
-  }
+/**
+ * 連續下載多個 CSV：每個檔案間隔約 400ms，避免手機瀏覽器只收到第一個。
+ * 回傳 Promise，全部觸發完才 resolve。
+ */
+export function downloadCsvFiles(files, { intervalMs = 400 } = {}) {
+  return new Promise((resolve) => {
+    const list = Array.isArray(files) ? files : [];
+    if (list.length === 0) {
+      resolve();
+      return;
+    }
+    list.forEach(({ filename, csvText }, idx) => {
+      setTimeout(() => {
+        downloadCsv(filename, csvText);
+        if (idx === list.length - 1) resolve();
+      }, idx * intervalMs);
+    });
+  });
 }
-

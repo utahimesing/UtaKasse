@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProductCard from '../components/ProductCard.jsx';
 import CartItemRow from '../components/CartItemRow.jsx';
 import NumpadDigits from '../components/NumpadDigits.jsx';
+import BundlePickerModal from '../components/BundlePickerModal.jsx';
 import Toast from '../components/Toast.jsx';
 import db, { createUUID } from '../db.js';
 import { getTaipeiDateKey, getTaipeiTimeHMS } from '../lib/dateTaipei.js';
@@ -10,60 +11,120 @@ import { parsePreordersCsvText } from '../lib/csv.js';
 import { t } from '../i18n/t.js';
 import { getString } from '../lib/strings.js';
 import { readCsvFileWithEncoding, withBom } from '../lib/csvImport.js';
-import { checkoutCta, ui } from '../lib/uiPalette.js';
+import { calcCartTotals } from '../lib/promo.js';
+import {
+  addLine, setLineQty, removeLine, makeSingleLine, makeBundleLine,
+  maxQtyForLine, qtyOfProductInCart, usageByProduct, lineToTxItem,
+} from '../lib/cart.js';
+import Button from '../components/Button.jsx';
+import { checkoutCta, ui, border, shadow, surface } from '../lib/uiPalette.js';
 
 const styles = {
-  shadow: '0 8px 32px rgba(128,161,212,0.18), 0 2px 8px rgba(192,185,221,0.12)',
   page: {
     minHeight: '100vh',
     backgroundColor: 'transparent',
-    paddingBottom: 132,
-    fontFamily: 'DM Sans, sans-serif',
+    paddingBottom: 40,
+    fontFamily: 'inherit',
     color: ui.ink,
   },
+  // H2 區塊標題：20px／800，下方偏左橘色粗色條
+  h2: { fontWeight: 800, fontSize: 20, color: ui.ink, letterSpacing: '-0.01em', lineHeight: 1.2 },
+  h2Bar: { width: 48, height: 6, background: ui.orange, border: border.solidSm, marginTop: 6 },
+  caption: { color: ui.muted, fontWeight: 600, fontSize: 12 },
   card: {
-    background: 'rgba(255,255,255,0.58)',
-    WebkitBackdropFilter: 'blur(20px)',
-    backdropFilter: 'blur(20px)',
-    borderRadius: 20,
-    border: '1px solid rgba(255,255,255,0.72)',
-    boxShadow: '0 8px 32px rgba(128,161,212,0.18), 0 2px 8px rgba(192,185,221,0.12)',
-    padding: 22,
+    ...surface.card,
+    padding: 16,
   },
+  // 預購單卡：待取件白底、已取件薄荷底＋淡化
   preorderCard: (isPending) => ({
-    background: 'rgba(255,255,255,0.58)',
-    WebkitBackdropFilter: 'blur(20px)',
-    backdropFilter: 'blur(20px)',
-    borderRadius: 20,
-    border: isPending
-      ? '1px solid rgba(128,161,212,0.35)'
-      : '1px solid rgba(255,255,255,0.55)',
-    boxShadow: isPending
-      ? '0 12px 32px rgba(128,161,212,0.22), 0 4px 14px rgba(192,185,221,0.12)'
-      : '0 6px 20px rgba(192,185,221,0.14)',
-    padding: 22,
-    opacity: isPending ? 1 : 0.72,
+    ...surface.card,
+    background: isPending ? ui.white : ui.mint,
+    boxShadow: isPending ? shadow.md : shadow.sm,
+    padding: 16,
+    opacity: isPending ? 1 : 0.8,
   }),
+  // 分頁籤 chip：pill、黑框、選中杏色
+  tab: (active) => ({
+    flex: 1,
+    minHeight: 40,
+    padding: '0 8px',
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 13,
+    border: border.solidSm,
+    backgroundColor: active ? ui.apricot : ui.white,
+    color: ui.ink,
+    cursor: 'pointer',
+    boxShadow: active ? shadow.sm : 'none',
+    transition: 'background 0.15s ease',
+  }),
+  // 狀態 badge：待處理杏色、已完成青綠
+  statusBadge: (isPending) => ({
+    display: 'inline-block',
+    fontSize: 12, fontWeight: 700, color: ui.ink,
+    padding: '4px 10px', borderRadius: 999,
+    border: border.solidSm,
+    background: isPending ? ui.apricot : ui.teal,
+  }),
+  input: {
+    width: '100%',
+    boxSizing: 'border-box',
+    minHeight: 44,
+    borderRadius: 10,
+    border: border.solidSm,
+    padding: '10px 14px',
+    fontWeight: 700,
+    fontSize: 15,
+    color: ui.ink,
+    backgroundColor: ui.white,
+    fontFamily: 'inherit',
+  },
   paymentPill: (active) => ({
     flex: 1,
+    minHeight: 44,
     borderRadius: 999,
-    padding: '12px 0',
-    fontWeight: 800,
+    padding: '0 8px',
+    fontWeight: 700,
     fontSize: 13,
-    border: active
-      ? '1.5px solid rgba(255,255,255,0.35)'
-      : '1.5px solid rgba(255,255,255,0.65)',
-    // 現金和非現金都用同一套藍紫系，不再用珊瑚紅
-    background: active
-      ? 'linear-gradient(135deg, #9BBCE8 0%, #80A1D4 100%)'
-      : 'rgba(255,255,255,0.52)',
-    WebkitBackdropFilter: active ? 'none' : 'blur(10px)',
-    backdropFilter: active ? 'none' : 'blur(10px)',
-    color: active ? '#FFFFFF' : ui.muted,
+    border: border.solidSm,
+    background: active ? ui.apricot : ui.white,
+    color: ui.ink,
     cursor: 'pointer',
-    boxShadow: active
-      ? '0 8px 20px rgba(128,161,212,0.36)'
-      : '0 2px 8px rgba(192,185,221,0.12)',
+    boxShadow: active ? shadow.sm : 'none',
+  }),
+  // 取件抽屜（底部 sheet）
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    ...surface.overlay,
+    zIndex: 2000,
+    display: 'flex',
+    alignItems: 'flex-end',
+  },
+  sheet: {
+    width: '100%',
+    boxSizing: 'border-box',
+    ...surface.sheet,
+    boxShadow: 'none',
+    padding: 20,
+    maxHeight: '85vh',
+    overflowY: 'auto',
+  },
+  // 結帳 CTA
+  cta: (disabledLook) => ({
+    width: '100%',
+    marginTop: 14,
+    minHeight: 52,
+    padding: '14px 10px',
+    borderRadius: 10,
+    border: checkoutCta.border,
+    color: checkoutCta.color,
+    fontWeight: checkoutCta.fontWeight,
+    fontSize: checkoutCta.fontSize,
+    background: checkoutCta.background,
+    boxShadow: disabledLook ? 'none' : checkoutCta.shadow,
+    opacity: disabledLook ? 0.6 : 1,
+    cursor: disabledLook ? 'not-allowed' : 'pointer',
   }),
 };
 
@@ -77,20 +138,15 @@ function isValidDexieKey(v) {
   return false;
 }
 
-function calcCartTotal(cart) {
-  return cart.reduce((s, it) => s + (it.unitPrice ?? 0) * (it.qty ?? 0), 0);
-}
-
 export default function Preorders() {
   const [activeTab, setActiveTab] = useState('all'); // all | pending | done
 
   const [events, setEvents] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
-  const [showAddEvent, setShowAddEvent] = useState(false);
-  const [newEventName, setNewEventName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
   const [products, setProducts] = useState([]);
+  const [bonusRules, setBonusRules] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [preOrders, setPreOrders] = useState([]);
 
@@ -102,11 +158,18 @@ export default function Preorders() {
   const [pickupPaymentId, setPickupPaymentId] = useState(null);
   const [pickupCashInput, setPickupCashInput] = useState('0');
 
-  // Add-on cart for B-type pickup
+  // Add-on cart for B-type pickup（以 lineId 為鍵，見 src/lib/cart.js）
   const [addOnOpen, setAddOnOpen] = useState(false);
   const [addOnCart, setAddOnCart] = useState([]);
+  const [bundlePicking, setBundlePicking] = useState(null);
 
   const toast = useToast();
+
+  const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const getStock = useCallback((productId) => {
+    const p = productsById.get(productId);
+    return p ? p.stock : null;
+  }, [productsById]);
 
   const activePreorder = useMemo(
     () => preOrders.find((p) => p.id === activePreorderId) ?? null,
@@ -122,22 +185,15 @@ export default function Preorders() {
     [paymentMethods, pickupPaymentId],
   );
 
-  const addOnTotal = useMemo(() => calcCartTotal(addOnCart), [addOnCart]);
-
-  const addOnCartItemsForUI = useMemo(() => {
-    return addOnCart.map((it) => ({
-      ...it,
-      name: it.name ?? '',
-      unitPrice: it.unitPrice ?? 0,
-      categoryIds: it.categoryIds ?? [],
-    }));
-  }, [addOnCart]);
+  // 加購清單也套用合購折扣（只算加購的品項）
+  const addOnTotals = useMemo(() => calcCartTotals(addOnCart, bonusRules), [addOnCart, bonusRules]);
+  const addOnTotal = addOnTotals.subtotal;
 
   async function getSelectedEventOrThrow() {
     const evts = await db.events.toArray();
     const evt = evts.find((e) => e?.id === selectedEventId && !e?.archived) ?? null;
     if (!evt || !isValidDexieKey(evt.id)) {
-      throw new Error('請先選擇活動');
+      throw new Error(t('preorders.selectEventShort'));
     }
     return evt;
   }
@@ -153,6 +209,9 @@ export default function Preorders() {
 
     const p = (await db.products.toArray()).filter((x) => !x?.archived);
     setProducts(p);
+
+    const rules = await db.bonusRules.orderBy('sortOrder').toArray();
+    setBonusRules(rules);
 
     const pms = (await db.paymentMethods.toArray())
       .filter((x) => !!x?.enabled)
@@ -180,53 +239,22 @@ export default function Preorders() {
     await loadAll();
   }
 
-  function formatEventDisplayName(name, date) {
-    const cleanName = String(name ?? '').trim();
-    const d = String(date ?? '').trim();
-    if (!cleanName || !d) return '';
-    const compact = d.replace(/-/g, '');
-    const yymmdd = compact.length === 8 ? compact.slice(2) : compact;
-    return `${cleanName}_${yymmdd}`;
-  }
-
-  async function addNewEvent() {
-    const name = newEventName.trim();
-    if (!name) return;
-    const dateKey = getTaipeiDateKey(new Date());
-    const displayName = formatEventDisplayName(name, dateKey);
-    if (!displayName) return;
-    const evt = {
-      id: createUUID(),
-      name: displayName,
-      date: dateKey,
-      status: 'active',
-      archived: false,
-      createdAt: Date.now(),
-    };
-
-    const evts = await db.events.toArray();
-    await Promise.all(evts.map((e) => db.events.update(e.id, { status: 'inactive' })));
-    await db.events.add(evt);
-
-    setShowAddEvent(false);
-    setNewEventName('');
-    closePickup();
-    await loadAll();
-  }
-
   useEffect(() => {
-    loadAll().catch((e) => console.error(e));
+    // 初次載入（非同步，不在 effect 內同步 setState）
+    Promise.resolve().then(() => loadAll()).catch((e) => console.error(e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!selectedEventId) {
-      setPreOrders([]);
-      return;
-    }
+    // 切換場次後重新讀該場次的預購單；沒選場次就清空
+    let alive = true;
     db.preOrders.toArray()
-      .then((rows) => setPreOrders(rows.filter((x) => x?.eventId === selectedEventId)))
+      .then((rows) => {
+        if (!alive) return;
+        setPreOrders(selectedEventId ? rows.filter((x) => x?.eventId === selectedEventId) : []);
+      })
       .catch((e) => console.error(e));
+    return () => { alive = false; };
   }, [selectedEventId]);
 
   const filteredPreOrders = useMemo(() => {
@@ -267,8 +295,8 @@ export default function Preorders() {
     setPickupCashInput((prev) => (prev === '0' ? String(n) : `${prev}${n}`));
   }
 
-  function pressClear() {
-    setPickupCashInput('0');
+  function pressDoubleZero() {
+    setPickupCashInput((prev) => (prev === '0' ? '0' : `${prev}00`));
   }
 
   function pressBackspace() {
@@ -287,71 +315,48 @@ export default function Preorders() {
   const cashInsufficient = !!paymentForPickup?.isCash && changeAmount < 0;
 
   function addOnToCart(product) {
+    if ((product.type ?? 'single') === 'bundle') {
+      setBundlePicking(product);
+      return;
+    }
+    setAddOnCart((prev) => addLine(prev, makeSingleLine(product), getStock));
+  }
+
+  function confirmAddOnBundle(components) {
+    const product = bundlePicking;
+    setBundlePicking(null);
+    if (!product) return;
+    setAddOnCart((prev) => addLine(prev, makeBundleLine(product, components), getStock));
+  }
+
+  function incAddOnQty(lineId) {
     setAddOnCart((prev) => {
-      const ex = prev.find((x) => x.productId === product.id);
-      const stock = product.stock;
-      const canClick = stock === null || typeof stock === 'undefined' || stock > 0;
-      if (!canClick) return prev;
-
-      if (!ex) {
-        return [
-          ...prev,
-          {
-            productId: product.id,
-            name: product.name,
-            unitPrice: product.price,
-            qty: 1,
-            color: product.color,
-            categoryIds: product.categoryIds ?? [],
-            stock,
-          },
-        ];
-      }
-
-      const maxQty = stock === null || typeof stock === 'undefined' ? Number.MAX_SAFE_INTEGER : stock;
-      const nextQty = Math.min(maxQty, ex.qty + 1);
-      if (nextQty === ex.qty) return prev;
-      return prev.map((x) => (x.productId === product.id ? { ...x, qty: nextQty, stock } : x));
+      const line = prev.find((x) => x.lineId === lineId);
+      return line ? setLineQty(prev, lineId, line.qty + 1, getStock) : prev;
     });
   }
 
-  function incAddOnQty(productId) {
-    const p = products.find((x) => x.id === productId);
-    if (!p) return;
-    setAddOnCart((prev) =>
-      prev.map((x) => {
-        if (x.productId !== productId) return x;
-        const maxQty = typeof p.stock === 'number' ? p.stock : Number.MAX_SAFE_INTEGER;
-        return { ...x, qty: clampQty(x.qty + 1, 1, maxQty), stock: p.stock };
-      }),
-    );
+  function decAddOnQty(lineId) {
+    setAddOnCart((prev) => {
+      const line = prev.find((x) => x.lineId === lineId);
+      return line ? setLineQty(prev, lineId, line.qty - 1, getStock) : prev;
+    });
   }
 
-  function decAddOnQty(productId) {
-    setAddOnCart((prev) =>
-      prev.map((x) => {
-        if (x.productId !== productId) return x;
-        const maxQty = typeof x.stock === 'number' ? x.stock : Number.MAX_SAFE_INTEGER;
-        return { ...x, qty: clampQty(x.qty - 1, 1, maxQty) };
-      }),
-    );
-  }
-
-  function removeAddOn(productId) {
-    setAddOnCart((prev) => prev.filter((x) => x.productId !== productId));
+  function removeAddOn(lineId) {
+    setAddOnCart((prev) => removeLine(prev, lineId));
   }
 
   function cartAddOnRows() {
-    return addOnCartItemsForUI.map((it) => {
-      const stock = it.stock;
-      const maxQty = typeof stock === 'number' ? stock : Number.MAX_SAFE_INTEGER;
+    return addOnCart.map((it) => {
+      const maxQty = maxQtyForLine(it, addOnCart, getStock);
       return (
         <CartItemRow
-          key={it.productId}
+          key={it.lineId}
           item={it}
-          onInc={() => incAddOnQty(it.productId)}
-          onDec={() => decAddOnQty(it.productId)}
-          onRemove={() => removeAddOn(it.productId)}
+          onInc={() => incAddOnQty(it.lineId)}
+          onDec={() => decAddOnQty(it.lineId)}
+          onRemove={() => removeAddOn(it.lineId)}
           canDec={it.qty > 1}
           canInc={it.qty < maxQty}
         />
@@ -375,8 +380,8 @@ export default function Preorders() {
       });
 
       if (!selectedEventId) {
-        setImportErrors(['請先選擇活動後再匯入 CSV。']);
-        toast.show('請先選擇活動後再匯入 CSV。');
+        setImportErrors([t('preorders.selectEventFirst')]);
+        toast.show(t('preorders.selectEventFirst'), 'error');
         return;
       }
       const evt = await getSelectedEventOrThrow();
@@ -428,7 +433,7 @@ export default function Preorders() {
 
   async function pickupA(preOrder) {
     if (!selectedEventId) {
-      toast.show('請先選擇活動');
+      toast.show(t('preorders.selectEventShort'), 'error');
       return;
     }
     const evt = await getSelectedEventOrThrow();
@@ -492,7 +497,7 @@ export default function Preorders() {
     }
 
     if (!selectedEventId) {
-      toast.show('請先選擇活動');
+      toast.show(t('preorders.selectEventShort'), 'error');
       return;
     }
     const evt = await getSelectedEventOrThrow();
@@ -508,15 +513,12 @@ export default function Preorders() {
       unitPrice: it.unitPrice,
     }));
 
-    const addOnTxItems = (addOnCart ?? []).map((it) => ({
-      productId: it.productId,
-      productName: it.name,
-      qty: it.qty,
-      unitPrice: it.unitPrice,
-    }));
+    const addOnTxItems = (addOnCart ?? []).map(lineToTxItem);
+    const addOnUsage = usageByProduct(addOnCart ?? []); // 單賣 ＋ 套組本身 ＋ 套組內容物
 
     const preorderTotal = preOrder.balanceDue ?? 0;
     const addOnTotalLocal = addOnTotal;
+    const addOnTotalsLocal = addOnTotals;
 
     await db.transaction('rw', db.products, db.preOrders, db.transactions, async () => {
       // Reduce stock for preorder items
@@ -529,14 +531,11 @@ export default function Preorders() {
         }
       }
 
-      // Reduce stock for add-ons
-      for (const it of addOnCart ?? []) {
-        if (!it.productId) continue;
-        const prod = await db.products.get(it.productId);
-        if (!prod) continue;
-        if (typeof prod.stock === 'number') {
-          await db.products.update(it.productId, { stock: Math.max(0, prod.stock - it.qty) });
-        }
+      // Reduce stock for add-ons（含套組內容物）
+      for (const [productId, used] of addOnUsage) {
+        const prod = await db.products.get(productId);
+        if (!prod || typeof prod.stock !== 'number') continue;
+        await db.products.update(productId, { stock: Math.max(0, prod.stock - used) });
       }
 
       const preorderPayment = {
@@ -564,7 +563,6 @@ export default function Preorders() {
 
       await db.transactions.add(preorderTx);
 
-      let saleTx = null;
       if (addOnTxItems.length > 0 && addOnTotalLocal > 0) {
         const salePayment = {
           methodId: paymentForPickup.id,
@@ -573,7 +571,7 @@ export default function Preorders() {
           isCash: paymentForPickup.isCash,
         };
 
-        saleTx = {
+        const saleTx = {
           id: createUUID(),
           eventId: evt.id,
           date: taipeiDate,
@@ -583,6 +581,9 @@ export default function Preorders() {
           preorderId: null,
           items: addOnTxItems,
           subtotal: addOnTotalLocal,
+          grossAmount: addOnTotalsLocal.grossAmount,
+          discounts: addOnTotalsLocal.discounts,
+          discountApproximate: !!addOnTotalsLocal.approximate,
           payments: [salePayment],
           depositAlreadyPaid: 0,
           bonusesTriggered: [],
@@ -614,7 +615,7 @@ export default function Preorders() {
 
   function downloadPreorderTemplate() {
     const header = ['event_name', 'order_id', 'buyer_name', 'phone_last5', 'item_name', 'item_qty', 'unit_price', 'total_price', 'paid_amount'];
-    const sampleEvent = String(selectedEvent?.name ?? '請填入場次名稱，例如CWT72-250601');
+    const sampleEvent = String(selectedEvent?.name ?? '請填入場次名稱，例如CWT72_250601');
     const sample = [
       `${sampleEvent},A0001,範例買家1,00001,範例商品1,1,100,100,100`,
       `${sampleEvent},A0002,範例買家2,00002,範例商品2,2,300,600,300`,
@@ -634,9 +635,8 @@ export default function Preorders() {
       <div
         style={{
           display: 'flex',
-          gap: 4,
-          padding: '0 4px 12px',
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          gap: 8,
+          padding: '0 6px 12px 0',
           marginBottom: 12,
         }}
       >
@@ -649,161 +649,51 @@ export default function Preorders() {
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            style={{
-              flex: 1,
-              padding: '10px 8px',
-              borderRadius: 20,
-              fontWeight: 800,
-              fontSize: 13,
-              border: activeTab === tab.key
-                ? '1.5px solid rgba(255,255,255,0.30)'
-                : '1.5px solid rgba(255,255,255,0.58)',
-              backgroundColor: activeTab === tab.key ? '#80A1D4' : 'rgba(255,255,255,0.38)',
-              WebkitBackdropFilter: 'blur(10px)',
-              backdropFilter: 'blur(10px)',
-              color: activeTab === tab.key ? '#FFFFFF' : '#9A8898',
-              cursor: 'pointer',
-              boxShadow: activeTab === tab.key
-                ? '0 6px 18px rgba(128,161,212,0.36)'
-                : '0 1px 8px rgba(180,140,220,0.10)',
-              transition: 'all 0.18s ease',
-            }}
+            style={styles.tab(activeTab === tab.key)}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* 活動管理：切換/新增活動 */}
-      <div style={{ padding: '0 8px 18px' }}>
-        <div style={{ fontWeight: 900, fontSize: 13, color: ui.ink, marginBottom: 8, borderLeft: '3px solid rgba(128,161,212,0.60)', paddingLeft: 10 }}>活動管理</div>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+      {/* 場次管理：切換場次（新增請到後台） */}
+      <div style={{ padding: '0 6px 20px 0' }}>
+        <div style={styles.h2}>{t('preorders.eventSection')}</div>
+        <div style={styles.h2Bar} />
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
           <select
             value={selectedEventId ?? ''}
             onChange={(e) => switchActiveEvent(e.target.value).catch((err) => console.error(err))}
-            style={{
-              width: '100%',
-              borderRadius: 14,
-              border: '1.5px solid rgba(255,255,255,0.55)',
-              padding: '13px 16px',
-              fontWeight: 800,
-              fontSize: 14,
-              color: '#2D1F3D',
-              backgroundColor: 'rgba(255,255,255,0.48)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              boxShadow: '0 4px 14px rgba(180,140,220,0.10)',
-              outline: 'none',
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              fontFamily: 'DM Sans, sans-serif',
-              flex: 1,
-            }}
+            style={{ ...styles.input, flex: 1 }}
           >
-            {events.length === 0 ? <option value="">未設定活動</option> : null}
-            {events.length > 0 ? <option value="">請選擇活動</option> : null}
+            {events.length === 0 ? <option value="">{t('preorders.noEvent')}</option> : null}
+            {events.length > 0 ? <option value="">{t('preorders.selectEvent')}</option> : null}
             {events.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}（{e.date}）
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            onClick={() => {
-              setShowAddEvent(true);
-              setNewEventName('');
-            }}
+          <div
             style={{
-              border: 'none',
-              borderRadius: 14,
-              padding: '13px 16px',
-              background: 'linear-gradient(135deg, #9BBCE8 0%, #80A1D4 100%)',
-              color: '#FFFFFF',
-              fontWeight: 800,
-              fontSize: 14,
-              cursor: 'pointer',
+              ...styles.caption,
+              fontSize: 11,
               whiteSpace: 'nowrap',
-              boxShadow: '0 6px 18px rgba(128,161,212,0.35)',
               flexShrink: 0,
+              padding: '0 4px',
+              lineHeight: 1.4,
+              textAlign: 'right',
             }}
           >
-            ＋ 新增
-          </button>
+            請至<br />後台新增
+          </div>
         </div>
       </div>
 
-      {showAddEvent ? (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-            zIndex: 3000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 14,
-          }}
-        >
-          <div
-            className="glass-sheet"
-            style={{ width: '100%', maxWidth: 420, borderRadius: 24, padding: 26, boxShadow: styles.shadow }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>新增活動</div>
-              <button
-                type="button"
-                style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9A8898', fontWeight: 900 }}
-                onClick={() => setShowAddEvent(false)}
-              >
-                {t('common.cancel')}
-              </button>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <input
-                value={newEventName}
-                onChange={(e) => setNewEventName(e.target.value)}
-                placeholder="活動名稱（例如 CWT72 或 WCSxCWT_D1）"
-                style={{
-                  width: '100%',
-                  borderRadius: 14,
-                  border: 'none',
-                  padding: '12px 12px',
-                  fontWeight: 800,
-                  outline: 'none',
-                  boxShadow: styles.shadow,
-                }}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => addNewEvent().catch((err) => console.error(err))}
-              style={{
-                width: '100%',
-                marginTop: 14,
-                borderRadius: 28,
-                border: 'none',
-                padding: '16px 10px',
-                background: checkoutCta.gradient,
-                color: '#FFFFFF',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: '0 10px 20px rgba(128,161,212,0.35)',
-              }}
-              disabled={!newEventName.trim()}
-            >
-              新增並切換
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div style={{ padding: '0 8px 22px' }}>
-        <div style={{ fontWeight: 900, fontSize: 14, borderLeft: '3px solid rgba(128,161,212,0.60)', paddingLeft: 10 }}>{t('preorders.listTitle')}</div>
-        <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 6 }}>
+      <div style={{ padding: '0 6px 22px 0' }}>
+        <div style={styles.h2}>{t('preorders.listTitle')}</div>
+        <div style={styles.h2Bar} />
+        <div style={{ ...styles.caption, marginTop: 8 }}>
           總 {preOrders.length} 筆 / 待取 {preOrders.filter((p) => p.status === 'pending').length} 筆
         </div>
         <div style={{ marginTop: 10 }}>
@@ -811,30 +701,16 @@ export default function Preorders() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={getString('P2')}
-            style={{
-              width: '100%',
-              borderRadius: 18,
-              border: '1.5px solid rgba(255,255,255,0.55)',
-              padding: '14px 16px',
-              fontWeight: 800,
-              fontSize: 14,
-              color: '#2D1F3D',
-              backgroundColor: 'rgba(255,255,255,0.48)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              boxShadow: '0 4px 14px rgba(180,140,220,0.10)',
-              outline: 'none',
-              fontFamily: 'DM Sans, sans-serif',
-            }}
+            style={styles.input}
           />
         </div>
       </div>
 
-      <div style={{ padding: '0 4px' }}>
+      <div style={{ padding: '0 6px 0 0' }}>
         {importErrors.length > 0 ? (
-          <div style={{ ...styles.card, marginBottom: 12, backgroundColor: 'rgba(255, 251, 245, 0.95)', boxShadow: styles.shadow }}>
-            <div style={{ fontWeight: 900, color: '#DC8C14' }}>{t('preorders.importErrors')}</div>
-            <ul style={{ margin: 0, paddingLeft: 18, color: '#9A8898', fontWeight: 800, fontSize: 12 }}>
+          <div style={{ ...styles.card, marginBottom: 16, backgroundColor: ui.apricot }}>
+            <div style={{ fontWeight: 800, color: ui.ink }}>⚠ {t('preorders.importErrors')}</div>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: ui.ink, fontWeight: 600, fontSize: 12 }}>
               {importErrors.map((e, i) => (
                 <li key={i}>{e}</li>
               ))}
@@ -843,9 +719,9 @@ export default function Preorders() {
         ) : null}
 
         {importWarnings.length > 0 ? (
-          <div style={{ ...styles.card, marginBottom: 12, backgroundColor: 'rgba(255, 252, 240, 0.95)', boxShadow: styles.shadow }}>
-            <div style={{ fontWeight: 900, color: '#DC8C14' }}>警告（部分項目可能未匯入）</div>
-            <ul style={{ margin: 0, paddingLeft: 18, color: '#9A8898', fontWeight: 800, fontSize: 12 }}>
+          <div style={{ ...styles.card, marginBottom: 16, backgroundColor: ui.apricot }}>
+            <div style={{ fontWeight: 800, color: ui.ink }}>⚠ 警告（部分項目可能未匯入）</div>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: ui.ink, fontWeight: 600, fontSize: 12 }}>
               {importWarnings.map((w, i) => (
                 <li key={i}>{w}</li>
               ))}
@@ -853,26 +729,12 @@ export default function Preorders() {
           </div>
         ) : null}
 
-          <div style={{ ...styles.card, marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
-            <div style={{ fontWeight: 900 }}>{t('preorders.importTitle')}</div>
-            <button
-              type="button"
-              onClick={downloadPreorderTemplate}
-              style={{
-                borderRadius: 24,
-                padding: '10px 14px',
-                fontWeight: 900,
-                backgroundColor: 'rgba(255,255,255,0.48)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255,255,255,0.52)',
-                cursor: 'pointer',
-                boxShadow: styles.shadow,
-              }}
-            >
+          <div style={{ ...styles.card, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{t('preorders.importTitle')}</div>
+            <Button variant="secondary" size="sm" onClick={downloadPreorderTemplate}>
               下載預購範本
-            </button>
+            </Button>
           </div>
           <input
             type="file"
@@ -884,13 +746,13 @@ export default function Preorders() {
               importPreordersFromFile(f).catch((err) => console.error(err));
             }}
           />
-          <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 11, marginTop: 8 }}>
+          <div style={{ ...styles.caption, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
             💡 提示：event_name 請填入後台顯示的場次名稱（如 CWT72_250601）。item_name 須與後台商品名稱完全一致，否則無法關聯庫存。
           </div>
         </div>
 
         {filteredPreOrders.length === 0 ? (
-          <div style={{ color: '#9A8898', fontWeight: 800, padding: 20 }}>{t('preorders.noData')}</div>
+          <div style={{ color: ui.muted, fontWeight: 700, padding: 20 }}>{t('preorders.noData')}</div>
         ) : (
           filteredPreOrders.map((o) => {
             const isPending = o.status === 'pending';
@@ -899,29 +761,28 @@ export default function Preorders() {
             return (
               <div
                 key={o.id}
-                style={{ ...styles.preorderCard(isPending), marginBottom: 12, cursor: 'pointer' }}
+                className="pressable"
+                style={{ ...styles.preorderCard(isPending), marginBottom: 16, cursor: 'pointer' }}
                 onClick={() => openPickup(o)}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                   <div>
-                    <div style={{ fontWeight: 900, fontSize: 18 }}>{o.buyerName}</div>
-                    <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 4 }}>
+                    <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: '-0.01em' }}>{o.buyerName}</div>
+                    <div style={{ ...styles.caption, marginTop: 4 }}>
                       {t('preorders.orderLast5Label')} {o.phoneLast5}
                     </div>
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
-                    {isPending ? (
-                      <div style={{ fontWeight: 900, color: '#DC8C14' }}>{t('preorders.status.pending')}</div>
-                    ) : (
-                      <div style={{ fontWeight: 900, color: '#9A8898' }}>{t('preorders.status.done')}</div>
-                    )}
+                    <span style={styles.statusBadge(isPending)}>
+                      {isPending ? t('preorders.status.pending') : t('preorders.status.done')}
+                    </span>
                     <div
                       style={{
                         marginTop: 6,
-                        fontWeight: 900,
-                        color: isA ? '#2A9E8A' : ui.primary,
-                        fontSize: 12,
+                        fontWeight: 800,
+                        color: ui.ink,
+                        fontSize: 13,
                       }}
                     >
                       {isA ? t('preorders.paidA') : `${t('preorders.paidBPrefix')}${balanceDue}`}
@@ -929,7 +790,7 @@ export default function Preorders() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: 10, color: ui.ink, fontWeight: 800, fontSize: 13 }}>
+                <div style={{ marginTop: 10, color: ui.ink, fontWeight: 600, fontSize: 14 }}>
                   {preorderItemsSummary(o)}
                 </div>
               </div>
@@ -940,151 +801,119 @@ export default function Preorders() {
 
       {/* Pickup panel */}
       {activePreorder ? (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-            zIndex: 2000,
-            display: 'flex',
-            alignItems: 'flex-end',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              borderRadius: '28px 28px 0 0',
-              padding: 26,
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              boxShadow:
-                '0 -16px 44px rgba(0,0,0,0.1), 0 20px 40px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.03)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>{t('preorders.pickupTitle')}</div>
-              <button type="button" style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9A8898', fontWeight: 900 }} onClick={closePickup}>
-                {t('common.close')}
-              </button>
+        <div style={styles.overlay} onClick={closePickup}>
+          <div style={styles.sheet} onClick={(e) => e.stopPropagation()}>
+            {/* 復古視窗標題列：杏色色帶＋黑色底線＋右側關閉鈕 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, margin: '-20px -20px 0', padding: '10px 14px 10px 20px', ...surface.titleBar }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{t('preorders.pickupTitle')}</div>
+              <Button variant="secondary" size="sm" onClick={closePickup} aria-label={t('common.close')}>
+                ✕
+              </Button>
             </div>
 
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontWeight: 900, fontSize: 20 }}>{activePreorder.buyerName}</div>
-              <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 4 }}>
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: '-0.01em' }}>{activePreorder.buyerName}</div>
+              <div style={{ ...styles.caption, marginTop: 4 }}>
                 {t('preorders.panelLast5Label')} {activePreorder.phoneLast5}
               </div>
             </div>
 
-            <div style={{ marginTop: 12, ...styles.card }}>
+            <div style={{ marginTop: 14, ...styles.card, boxShadow: shadow.sm }}>
               {preorderIsA ? (
                 <>
-                  <div style={{ color: ui.primary, fontWeight: 900 }}>{t('preorders.fullPaidLabel')}</div>
+                  <span style={styles.statusBadge(false)}>{t('preorders.fullPaidLabel')}</span>
                   <div style={{ marginTop: 10 }}>
                     {(activePreorder.items ?? []).map((it, idx) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', marginBottom: 4 }}>
-                        <div style={{ fontWeight: 900 }}>{it.productName}</div>
-                        <div style={{ color: '#9A8898', fontWeight: 800 }}>
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '10px 0', borderBottom: `1px solid ${ui.lineSoft}` }}>
+                        <div style={{ fontWeight: 800 }}>{it.productName}</div>
+                        <div style={{ color: ui.muted, fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap' }}>
                           {it.qty} 件 · NT${it.unitPrice} / 件
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontWeight: 900, color: '#2A9E8A', marginTop: 10 }}>
+                  <div style={{ fontWeight: 800, color: ui.ink, marginTop: 12 }}>
                     {t('preorders.fullPaidDetailPrefix')}
                     {activePreorder.totalPrice}
                   </div>
                   <button
                     type="button"
                     onClick={() => pickupA(activePreorder)}
-                    style={{
-                      width: '100%',
-                      marginTop: 14,
-                      padding: '16px 10px',
-                      borderRadius: 28,
-                      border: 'none',
-                      color: '#FFFFFF',
-                      fontWeight: 800,
-                      fontSize: 18,
-                      background: checkoutCta.gradient,
-                      boxShadow: checkoutCta.shadow,
-                    }}
+                    style={{ ...styles.cta(false), background: ui.teal }}
                   >
                     {t('preorders.confirmA')}
                   </button>
-                  <div style={{ marginTop: 10, color: '#9A8898', fontWeight: 800, fontSize: 12 }}>
+                  <div style={{ ...styles.caption, marginTop: 10 }}>
                     {t('preorders.hintA')}
                   </div>
                 </>
               ) : (
                 <>
-                  <div style={{ fontWeight: 900, fontSize: 14, color: ui.primary }}>{t('preorders.balanceDueLabel')}</div>
-                  <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontWeight: 900, fontSize: 12, color: '#9A8898' }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: ui.ink }}>{t('preorders.balanceDueLabel')}</div>
+                  <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                    <div style={styles.caption}>
                       {t('preorders.balanceDueLabel')} NT${activePreorder.balanceDue}
                     </div>
-                    <div style={{ fontWeight: 800, fontSize: 36, color: ui.ink }}>{`NT$${activePreorder.balanceDue}`}</div>
+                    <div style={{ fontWeight: 800, fontSize: 32, letterSpacing: '-0.02em', lineHeight: 1, color: ui.ink }}>{`NT$${activePreorder.balanceDue}`}</div>
                   </div>
 
                   <div style={{ marginTop: 12 }}>
-                    <button
-                      type="button"
+                    <Button
+                      variant={addOnOpen ? 'success' : 'secondary'}
                       onClick={() => setAddOnOpen((v) => !v)}
-                      style={{
-                        width: '100%',
-                        borderRadius: 28,
-                        border: 'none',
-                        backgroundColor: 'rgba(128,161,212,0.08)',
-                        padding: '14px 10px',
-                        fontWeight: 800,
-                        color: ui.primary,
-                        cursor: 'pointer',
-                        boxShadow: styles.shadow,
-                      }}
+                      style={{ width: '100%' }}
                     >
                       {t('preorders.addonButton')}
-                    </button>
+                    </Button>
                   </div>
 
                   {addOnOpen ? (
                     <div style={{ marginTop: 12 }}>
-                      <div style={{ fontWeight: 900, marginBottom: 10 }}>{t('preorders.addonTitle')}</div>
-                      {addOnCartItemsForUI.length === 0 ? (
-                        <div style={{ color: '#9A8898', fontWeight: 800, padding: 8 }}>{t('preorders.addonEmpty')}</div>
+                      <div style={{ fontWeight: 800, marginBottom: 10 }}>{t('preorders.addonTitle')}</div>
+                      {addOnCart.length === 0 ? (
+                        <div style={{ color: ui.muted, fontWeight: 600, padding: 8 }}>{t('preorders.addonEmpty')}</div>
                       ) : (
                         <div style={{ marginBottom: 12 }}>
                           {cartAddOnRows()}
-                          <div style={{ fontWeight: 900, fontSize: 18, color: ui.primary, textAlign: 'right', marginTop: 6 }}>
-                            加購小計 NT${addOnTotal}
+                          {addOnTotals.discounts.map((d) => (
+                            <div key={d.ruleId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, fontWeight: 700, padding: '4px 0' }}>
+                              <span>🏷️ {d.ruleName} ×{d.times}</span>
+                              <span>−NT${d.amount}</span>
+                            </div>
+                          ))}
+                          {addOnTotals.approximate ? (
+                            <div style={{ ...styles.caption, marginTop: 4 }}>{t('sales.discountApprox')}</div>
+                          ) : null}
+                          <div style={{ fontWeight: 800, fontSize: 18, color: ui.ink, textAlign: 'right', marginTop: 8 }}>
+                            {t('preorders.addonSubtotal')} NT${addOnTotal}
                           </div>
                         </div>
                       )}
 
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-                        {products.slice(0, 12).map((p) => {
-                          const cartQty = addOnCart.find((x) => x.productId === p.id)?.qty ?? 0;
-                          return (
-                            <ProductCard
-                              key={p.id}
-                              product={p}
-                              cartQty={cartQty}
-                              onClick={() => addOnToCart(p)}
-                            />
-                          );
-                        })}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, padding: '2px 6px 6px 2px' }}>
+                        {products.slice(0, 12).map((p) => (
+                          <ProductCard
+                            key={p.id}
+                            product={p}
+                            cartQty={qtyOfProductInCart(addOnCart, p.id)}
+                            onClick={() => addOnToCart(p)}
+                          />
+                        ))}
                       </div>
                     </div>
                   ) : null}
 
-                  <div style={{ marginTop: 12, ...styles.card, padding: 20, backgroundColor: 'rgba(255,255,255,0.48)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.52)' }}>
-                    <div style={{ fontWeight: 900, fontSize: 12, color: '#9A8898' }}>應收總額（尾款＋加購）</div>
-                    <div style={{ marginTop: 4, fontWeight: 800, fontSize: 32, color: ui.ink, textAlign: 'right' }}>
+                  {/* 應收總額：橘色色塊＋Display 字級 */}
+                  <div style={{ marginTop: 12, ...styles.card, boxShadow: shadow.sm, background: ui.orange }}>
+                    <div style={{ ...styles.caption, color: ui.ink }}>應收總額（尾款＋加購）</div>
+                    <div style={{ marginTop: 4, fontWeight: 800, fontSize: 40, letterSpacing: '-0.02em', lineHeight: 1, color: ui.ink, textAlign: 'right', wordBreak: 'break-all' }}>
                       NT${expectedTotalCollect}
                     </div>
                   </div>
 
                   <div style={{ marginTop: 12 }}>
-                    <div style={{ fontWeight: 900, color: ui.ink }}>{t('preorders.paymentTitle')}</div>
-                    <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+                    <div style={{ fontWeight: 800, color: ui.ink }}>{t('preorders.paymentTitle')}</div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 8, padding: '0 4px 4px 0' }}>
                       {paymentMethods
                         .filter((m) => m.enabled)
                         .slice(0, 3)
@@ -1092,7 +921,7 @@ export default function Preorders() {
                           <button
                             key={m.id}
                             type="button"
-                            style={styles.paymentPill(pickupPaymentId === m.id, m.isCash)}
+                            style={styles.paymentPill(pickupPaymentId === m.id)}
                             onClick={() => {
                               setPickupPaymentId(m.id);
                               if (m.isCash) setPickupCashInput('0');
@@ -1106,7 +935,7 @@ export default function Preorders() {
 
                   <div style={{ marginTop: 12 }}>
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontWeight: 900, fontSize: 12, color: '#9A8898', marginBottom: 6 }}>實收金額</div>
+                      <div style={{ ...styles.caption, marginBottom: 6 }}>實收金額</div>
                       <input
                         type="number"
                         inputMode="numeric"
@@ -1121,34 +950,28 @@ export default function Preorders() {
                           const digitsOnly = v.replace(/[^\d]/g, '');
                           setPickupCashInput(digitsOnly === '' ? '0' : digitsOnly);
                         }}
-                        style={{
-                          width: '100%',
-                          borderRadius: 14,
-                          border: 'none',
-                          padding: '12px 12px',
-                          fontWeight: 800,
-                          outline: 'none',
-                          boxShadow: styles.shadow,
-                        }}
+                        style={{ ...styles.input, fontSize: 20, fontWeight: 800, textAlign: 'right' }}
                       />
                     </div>
-                    <NumpadDigits
-                      value={cashValue}
-                      disabled={false}
-                      onDigit={(n) => pressDigit(n)}
-                      onClear={pressClear}
-                      onBackspace={pressBackspace}
-                    />
+                    <div style={{ padding: '0 4px 4px 0' }}>
+                      <NumpadDigits
+                        disabled={false}
+                        onDigit={(n) => pressDigit(n)}
+                        onDoubleZero={pressDoubleZero}
+                        onBackspace={pressBackspace}
+                      />
+                    </div>
                     <div
                       style={{
                         textAlign: 'right',
                         marginTop: 10,
                         fontWeight: 800,
-                        fontSize: 22,
-                        color: cashInsufficient ? ui.primary : '#2A9E8A',
+                        fontSize: 24,
+                        letterSpacing: '-0.01em',
+                        color: ui.ink,
                       }}
                     >
-                      {`${getString('S9')}${changeAmount}`}
+                      {cashInsufficient ? '⚠ ' : ''}{`${getString('S9')}${changeAmount}`}
                     </div>
                   </div>
 
@@ -1156,26 +979,13 @@ export default function Preorders() {
                     type="button"
                     onClick={() => {
                       if (paymentForPickup?.isCash && !isCashSufficient) {
-                        toast.show(getString('A3'));
+                        toast.show(getString('S11'), 'error');
                         return;
                       }
                       pickupB(activePreorder);
                     }}
-                    disabled={checkoutDisabledB(activePreorder, paymentForPickup, expectedTotalCollect, pickupCashInput)}
-                    style={{
-                      width: '100%',
-                      marginTop: 14,
-                      padding: '16px 10px',
-                      borderRadius: 28,
-                      border: 'none',
-                      color: '#FFFFFF',
-                      fontWeight: 800,
-                      fontSize: 18,
-                      background: checkoutCta.gradient,
-                      opacity: !isCashSufficient ? 0.6 : 1,
-                      cursor: !isCashSufficient ? 'not-allowed' : 'pointer',
-                      boxShadow: checkoutCta.shadow,
-                    }}
+                    disabled={checkoutDisabledB(activePreorder, paymentForPickup, expectedTotalCollect)}
+                    style={styles.cta(!isCashSufficient)}
                   >
                     {t('preorders.finishB')}
                   </button>
@@ -1185,17 +995,22 @@ export default function Preorders() {
           </div>
         </div>
       ) : null}
-      <Toast message={toast.message} visible={toast.visible} />
+      {bundlePicking ? (
+        <BundlePickerModal
+          product={bundlePicking}
+          products={products}
+          cart={addOnCart}
+          getStock={getStock}
+          onConfirm={confirmAddOnBundle}
+          onClose={() => setBundlePicking(null)}
+        />
+      ) : null}
+      <Toast message={toast.message} visible={toast.visible} variant={toast.variant} />
     </div>
   );
 }
 
-function clampQty(qty, min, max) {
-  const n = Number.isFinite(qty) ? qty : min;
-  return Math.max(min, Math.min(max, n));
-}
-
-function checkoutDisabledB(preorder, payment, expectedTotalCollect, pickupCashInput) {
+function checkoutDisabledB(preorder, payment, expectedTotalCollect) {
   if (!preorder) return true;
   if (!payment) return true;
   if (expectedTotalCollect <= 0) return true;

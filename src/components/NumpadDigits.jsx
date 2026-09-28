@@ -1,15 +1,16 @@
-import { ui, cardShadowElevated } from '../lib/uiPalette.js';
+import { ui, border, shadow } from '../lib/uiPalette.js';
 
 const numBtn = {
-  padding: '22px 0',
-  fontSize: '1.8rem',
+  padding: '18px 0',
+  minHeight: 44,
+  fontSize: '1.7rem',
   fontWeight: 800,
   fontFamily: 'inherit',
-  backgroundColor: '#FFFFFF',
-  border: 'none',
-  borderRadius: '14px',
-  boxShadow: cardShadowElevated,
-  color: '#444444',
+  backgroundColor: ui.white,
+  border: border.solid,
+  borderRadius: 10,
+  boxShadow: shadow.sm,
+  color: ui.ink,
   cursor: 'pointer',
   display: 'flex',
   justifyContent: 'center',
@@ -19,8 +20,7 @@ const numBtn = {
 
 const actionBtn = {
   ...numBtn,
-  backgroundColor: '#F2F2F2',
-  color: ui.primary,
+  backgroundColor: ui.apricot,
 };
 
 export default function NumpadDigits({
@@ -31,12 +31,12 @@ export default function NumpadDigits({
   compact = false,
 }) {
   const btn = compact
-    ? { ...numBtn, padding: '11px 0', fontSize: '1.3rem', borderRadius: '10px' }
+    ? { ...numBtn, padding: '10px 0', fontSize: '1.3rem', borderRadius: 8 }
     : numBtn;
   const act = compact
-    ? { ...actionBtn, padding: '11px 0', fontSize: '1.3rem', borderRadius: '10px' }
+    ? { ...actionBtn, padding: '10px 0', fontSize: '1.3rem', borderRadius: 8 }
     : actionBtn;
-  const gap = compact ? 6 : 12;
+  const gap = compact ? 8 : 12;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap }}>

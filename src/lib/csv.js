@@ -55,7 +55,7 @@ export function parsePreordersCsvText(text, { productByName, eventId, expectedEv
       return normalized !== expectedNameNorm && normalized !== expectedIdNorm;
     });
     if (mismatch) {
-      headerErrors.push(`CSV 的場次名稱與目前選擇的活動「${expectedEventName}」不一致，請確認後重新匯入。`);
+      headerErrors.push(`CSV 的場次名稱與目前選擇的場次「${expectedEventName}」不一致，請確認後重新匯入。`);
       return { preOrders: [], headerErrors, rowErrors, warnings };
     }
   }
@@ -121,6 +121,10 @@ export function parsePreordersCsvText(text, { productByName, eventId, expectedEv
     if (!prod) {
       warnings.push(`第 ${line} 行：找不到商品「${itemName}」，此項將不匯入並避免結帳/扣庫存出錯。`);
       return;
+    }
+    if ((prod.type ?? 'single') === 'bundle') {
+      // 預購 CSV 不支援套組選款：只扣套組本身的庫存，內容物要靠取件時加購補點或手動調整
+      warnings.push(`第 ${line} 行：⚠️『${itemName}』是套組，內容物不會自動扣庫存，請在取件時用加購補點，或手動調整庫存。`);
     }
 
     const orderKey = orderId ? orderId : `${buyerName}__${phoneLast5}`;

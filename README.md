@@ -63,6 +63,10 @@ Run this flow after each significant change:
 - Do not use real phone numbers, transaction notes, or user identifiers in shared backup files.
 - If sharing backup JSON externally, review and sanitize first.
 
+## CSV and Excel
+
+- When opening exported report CSV files in Excel, note that cells in the buyer/note column starting with `=`, `+`, `-`, or `@` may be interpreted as formulas. Review or sanitize those fields before sharing exports.
+
 ## Versioning
 
 - Recommended tag format: `vMAJOR.MINOR.PATCH`

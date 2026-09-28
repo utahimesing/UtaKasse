@@ -1,13 +1,20 @@
+import { canFillOnce } from './promo.js';
+
 /**
- * Fullfillment of交接包：滿額禮規則引擎 evalBonuses
+ * 活動提醒引擎 evalBonuses（滿額禮 amount ＋ 合購 gift 模式）
+ *
+ * cartItems: [{ productId, qty, sub, catIds, kind }]
+ *   - sub：這一行「折扣後」的金額（Sales 已把合購折扣攤進去；沒有折扣就是 unitPrice × qty）
+ *   - kind === 'bundle' 的行不參與合購 gift 判斷，但金額算進滿額禮
+ *
  * 規則重點：
- * - amount 型：依類別（categoryId）計算小計；categoryId=null 時計算全車
- * - product 型：購物車含指定商品且 qty >= triggerProductQty
+ * - amount 型：依類別（categoryId）計算小計；categoryId=null 時計算全車。門檻用折扣後金額（需求單 Q5）
+ * - combo 型（rewardType 'gift'）：購物車（不含套組）能湊滿至少 1 組 slots 就提醒；price 模式由 promo.js 處理，不在這裡
  * - exclusiveGroup 互斥：
  *   - exclusiveGroup == null => 獨立觸發（全部通過）
  *   - 同一 exclusiveGroup 只取一條；比對順序：
- *     1) product 型優先於 amount 型
- *     2) 門檻高者（amount 比 triggerAmount；product 比 triggerProductQty）
+ *     1) combo 型優先於 amount 型
+ *     2) 門檻高者（amount 比 triggerAmount；combo 比 slots 總件數）
  *     3) sortOrder 小者
  */
 export function evalBonuses(cartItems, bonusRules) {
@@ -15,7 +22,6 @@ export function evalBonuses(cartItems, bonusRules) {
   const rules = bonusRules ?? [];
 
   const getItemSubtotal = (it) => {
-    // Sales 已傳 sub；此處保底讓引擎在其他呼叫端也不會壞。
     if (typeof it?.sub === 'number') return it.sub;
     if (typeof it?.unitPrice === 'number' && typeof it?.qty === 'number') return it.unitPrice * it.qty;
     return 0;
@@ -35,26 +41,18 @@ export function evalBonuses(cartItems, bonusRules) {
       const sum = scopedItems.reduce((s, it) => s + getItemSubtotal(it), 0);
       const threshold = rule.triggerAmount ?? 0;
       if (sum >= threshold) triggered.push(rule);
-    } else if (rule.triggerType === 'product') {
-      const triggerIds = Array.isArray(rule.triggerProductIds)
-        ? rule.triggerProductIds
-        : rule.triggerProductId
-          ? [rule.triggerProductId]
-          : [];
-
-      const triggerQty = rule.triggerProductQty ?? 1;
-      const ok = items.some(
-        (it) => triggerIds.includes(it.productId) && (it.qty ?? 0) >= triggerQty,
-      );
-      if (ok) triggered.push(rule);
+    } else if (rule.triggerType === 'combo' && rule.rewardType !== 'price') {
+      if (canFillOnce(items, rule)) triggered.push(rule);
     }
   }
 
   const independent = [];
   const groupWinnersById = new Map(); // exclusiveGroup => rule
 
-  const typeRank = (r) => (r.triggerType === 'product' ? 2 : 1);
-  const thresholdOf = (r) => (r.triggerType === 'product' ? (r.triggerProductQty ?? 1) : r.triggerAmount ?? 0);
+  const typeRank = (r) => (r.triggerType === 'combo' ? 2 : 1);
+  const thresholdOf = (r) => (r.triggerType === 'combo'
+    ? (r.slots ?? []).reduce((s, slot) => s + (parseInt(slot.qty, 10) || 1), 0)
+    : r.triggerAmount ?? 0);
   const sortOrderOf = (r) => (Number.isFinite(r.sortOrder) ? r.sortOrder : 999999);
 
   for (const rule of triggered) {
@@ -105,4 +103,3 @@ export function evalBonuses(cartItems, bonusRules) {
     sortOrder: sortOrderOf(r),
   }));
 }
-

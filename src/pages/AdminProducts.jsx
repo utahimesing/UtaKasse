@@ -1,63 +1,113 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { GripVertical } from 'lucide-react';
 import ProductCard from '../components/ProductCard.jsx';
 import db, { createUUID, normalizeStockInput } from '../db.js';
 import { fileToDataUrl, validateImageFile } from '../lib/image.js';
 import { t } from '../i18n/t.js';
+import { ensureSeedData } from '../lib/seed.js';
 import Toast from '../components/Toast.jsx';
 import { getString } from '../lib/strings.js';
 import { useToast } from '../lib/useToast.js';
 import { buildCsvParseError, hasRequiredFields, parseCleanCsv, pickField, readCsvFileWithEncoding, withBom } from '../lib/csvImport.js';
-import { PRODUCT_COLOR_PRESETS as COLOR_PRESETS, cardShadowElevated, ui } from '../lib/uiPalette.js';
+import { PRODUCT_COLOR_PRESETS as COLOR_PRESETS, ui, border, shadow, surface, buttonVariants } from '../lib/uiPalette.js';
 import BackupRestore from '../components/BackupRestore.jsx';
 import Button from '../components/Button.jsx';
 import SectionHeader from '../components/SectionHeader.jsx';
+import SlotEditor from '../components/SlotEditor.jsx';
+import { makeEmptySlot } from '../lib/slots.js';
+import { minFillPrice } from '../lib/promo.js';
 import EmptyState from '../components/EmptyState.jsx';
 
 const styles = {
-  shadow: '0 12px 36px rgba(180,140,220,0.18), 0 3px 10px rgba(180,140,220,0.10)',
   page: {
     minHeight: '100vh',
     backgroundColor: 'transparent',
-    paddingBottom: 126,
-    fontFamily: 'DM Sans, sans-serif',
+    paddingBottom: 40,
+    fontFamily: 'inherit',
     color: ui.ink,
   },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-    gap: 10,
+    gap: 12,
+    padding: '2px 6px 6px 2px', // 右／下留給硬陰影
   },
+  // 資訊卡：白底＋黑框＋硬陰影，內距 16
   formCard: {
-    background: 'rgba(255,255,255,0.60)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.75)',
-    borderRadius: 20,
-    boxShadow: '0 8px 32px rgba(128,161,212,0.14)',
-    padding: 20,
+    ...surface.card,
+    padding: 16,
   },
+  // 列表內的小卡（場次／活動規則／付款方式）
+  rowCard: {
+    background: ui.white,
+    border: border.solidSm,
+    borderRadius: 10,
+    padding: '10px 12px',
+    boxShadow: shadow.sm,
+  },
+  // H2 區塊標題＋偏左橘色粗色條
+  h2: { fontWeight: 800, fontSize: 20, color: ui.ink, letterSpacing: '-0.01em', lineHeight: 1.2 },
+  h2Bar: { width: 48, height: 6, background: ui.orange, border: border.solidSm, marginTop: 6, marginBottom: 10 },
+  caption: { color: ui.muted, fontWeight: 600, fontSize: 12 },
+  typeBadge: { display: 'inline-block', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, border: border.solidSm, background: ui.mint },
   label: {
-    fontWeight: 900, fontSize: 12, color: '#3D3060', marginBottom: 10,
+    fontWeight: 700, fontSize: 12, color: ui.ink, marginBottom: 8,
+    textTransform: 'uppercase', letterSpacing: '0.04em',
   },
   input: {
-    width: '100%', borderRadius: 14,
-    border: '1.5px solid rgba(255,255,255,0.70)',
-    padding: '13px 16px', fontWeight: 700, outline: 'none',
-    background: 'rgba(255,255,255,0.52)',
-    backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-    boxShadow: '0 4px 14px rgba(128,161,212,0.10)',
-    color: '#3D3060', fontFamily: 'DM Sans, sans-serif',
-    fontSize: 14,
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    minHeight: 44,
+    borderRadius: 10,
+    border: border.solidSm,
+    padding: '10px 14px', fontWeight: 700,
+    background: ui.white,
+    color: ui.ink, fontFamily: 'inherit',
+    fontSize: 15,
+  },
+  // 按鈕代幣（沿用 Button.jsx 的 variant，給原生 <button> 用）
+  btnBase: {
+    minHeight: 44, borderRadius: 10, padding: '10px 14px',
+    fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  get btnPrimary() { return { ...this.btnBase, ...buttonVariants.primary }; },
+  get btnSecondary() { return { ...this.btnBase, ...buttonVariants.secondary }; },
+  get btnDanger() { return { ...this.btnBase, ...buttonVariants.destructive }; },
+  get btnDangerFilled() { return { ...this.btnBase, ...buttonVariants.destructiveFilled }; },
+  // 列表內的小按鈕（編輯／封存／刪除）：高度仍 ≥ 44
+  get btnSmall() { return { ...this.btnBase, ...buttonVariants.secondary, padding: '6px 12px', fontSize: 13 }; },
+  get btnSmallDanger() { return { ...this.btnBase, ...buttonVariants.destructive, padding: '6px 12px', fontSize: 13 }; },
+  // chip：pill、黑框、選中杏色
+  chip: (active) => ({
+    minHeight: 36, padding: '0 14px', borderRadius: 999,
+    fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+    border: border.solidSm,
+    background: active ? ui.apricot : ui.white,
+    color: ui.ink,
+    boxShadow: active ? shadow.sm : 'none',
+    transition: 'background 0.15s ease',
+  }),
+  // 底部抽屜（商品表單）
+  overlay: {
+    position: 'fixed', inset: 0, ...surface.overlay,
+    zIndex: 3000, display: 'flex', alignItems: 'flex-end',
+  },
+  sheet: {
+    width: '100%', boxSizing: 'border-box',
+    ...surface.sheet, boxShadow: 'none',
+    padding: 20, maxHeight: '90vh', overflowY: 'auto',
+    background: ui.mint,
   },
   swatch: (active, color) => ({
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: 999,
     backgroundColor: color,
-    border: active ? '3px solid rgba(128,161,212,0.60)' : '2px solid rgba(255,255,255,0.70)',
-    boxShadow: active
-      ? '0 0 0 3px rgba(128,161,212,0.18)'
-      : '0 2px 10px rgba(0,0,0,0.08)',
+    border: border.solidSm,
+    boxShadow: active ? '3px 3px 0 #1A1A1A' : 'none',
+    transform: active ? 'translate(-1px, -1px)' : 'none',
     cursor: 'pointer',
   }),
 };
@@ -73,6 +123,127 @@ function isArchivedProduct(product) {
   return v === true || String(v).toLowerCase() === 'true' || String(v) === '1';
 }
 
+function compareProductSortOrder(a, b) {
+  const aOrder = a.sortOrder;
+  const bOrder = b.sortOrder;
+  const aHasOrder = aOrder != null && Number.isFinite(Number(aOrder));
+  const bHasOrder = bOrder != null && Number.isFinite(Number(bOrder));
+  if (aHasOrder && bHasOrder && aOrder !== bOrder) return aOrder - bOrder;
+  if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+  return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'zh-Hant');
+}
+
+function DraggableProductGrid({ orderedProducts, onEdit, onReorder }) {
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const dragStateRef = useRef({ active: false, productId: null });
+  const dragOverIdRef = useRef(null);
+
+  function beginDrag(e, productId) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragStateRef.current = { active: true, productId };
+    dragOverIdRef.current = productId;
+    setDraggingId(productId);
+    setDragOverId(productId);
+
+    function handlePointerMove(ev) {
+      if (!dragStateRef.current.active) return;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const target = el?.closest('[data-product-id]');
+      const overId = target?.getAttribute('data-product-id');
+      if (overId) {
+        dragOverIdRef.current = overId;
+        setDragOverId(overId);
+      }
+    }
+
+    function endDrag() {
+      if (!dragStateRef.current.active) return;
+      const fromId = dragStateRef.current.productId;
+      const toId = dragOverIdRef.current;
+      dragStateRef.current = { active: false, productId: null };
+      setDraggingId(null);
+      setDragOverId(null);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', endDrag);
+      window.removeEventListener('pointercancel', endDrag);
+      if (fromId && toId && fromId !== toId) {
+        onReorder(fromId, toId);
+      }
+    }
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
+  }
+
+  return (
+    <div style={styles.grid}>
+      {orderedProducts.map((p) => {
+        const stock = typeof p.stock === 'number' ? p.stock : null;
+        const isDragging = draggingId === p.id;
+        const isDropTarget = dragOverId === p.id && draggingId !== p.id;
+        return (
+          <div
+            key={p.id}
+            data-product-id={p.id}
+            style={{
+              position: 'relative',
+              opacity: isDragging ? 0.55 : 1,
+              transform: isDragging ? 'scale(0.98)' : 'none',
+              outline: isDropTarget ? `3px dashed ${ui.ink}` : 'none',
+              outlineOffset: 3,
+              borderRadius: 14,
+              transition: isDragging ? 'none' : 'transform 0.15s ease, opacity 0.15s ease',
+            }}
+          >
+            <button
+              type="button"
+              aria-label="拖曳調整排序"
+              onPointerDown={(e) => beginDrag(e, p.id)}
+              style={{
+                position: 'absolute',
+                top: -6,
+                right: -6,
+                zIndex: 2,
+                width: 44,
+                height: 44,
+                borderRadius: 999,
+                border: border.solidSm,
+                background: ui.apricot,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'grab',
+                touchAction: 'none',
+                color: ui.ink,
+                boxShadow: shadow.sm,
+              }}
+            >
+              <GripVertical size={16} />
+            </button>
+            <div onClick={() => onEdit(p)} style={{ cursor: 'pointer' }}>
+              <ProductCard
+                product={{
+                  ...p,
+                  stock,
+                  categoryIds: p.categoryIds ?? [],
+                  isNew: p.isNew,
+                  imageUrl: p.imageUrl ?? null,
+                  archived: p.archived,
+                }}
+                cartQty={0}
+                onClick={() => onEdit(p)}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AdminProducts({ products = [], refreshProducts }) {
   const [categories, setCategories] = useState([]);
   const [bonusRules, setBonusRules] = useState([]);
@@ -81,8 +252,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
   const [events, setEvents] = useState([]);
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [adminTab, setAdminTab] = useState('products');
-  const [eventName, setEventName] = useState('');
-  const [eventDate, setEventDate] = useState('');
+  const [eventDraft, setEventDraft] = useState(null);
   const [paymentDraft, setPaymentDraft] = useState(null);
   const [bonusDraft, setBonusDraft] = useState(null);
 
@@ -103,10 +273,15 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     });
   }, [products, search, showArchived]);
 
+  const orderedProducts = useMemo(
+    () => [...filteredProducts].sort(compareProductSortOrder),
+    [filteredProducts],
+  );
+
   const activeProductsForRules = useMemo(() => {
     const source = ruleProducts.length > 0 ? ruleProducts : products;
     return source
-      .filter((p) => !isArchivedProduct(p))
+      .filter((p) => !isArchivedProduct(p) && (p.type ?? 'single') === 'single')
       .slice()
       .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
   }, [ruleProducts, products]);
@@ -124,6 +299,54 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     setRuleProducts(allProducts.filter((p) => !isArchivedProduct(p)));
     setPaymentMethods(pms);
     setEvents(evts);
+  }
+
+  async function reorderProducts(fromId, toId) {
+    const list = [...orderedProducts];
+    const fromIdx = list.findIndex((p) => p.id === fromId);
+    const toIdx = list.findIndex((p) => p.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+
+    await Promise.all(
+      list.map((product, order) => db.products.update(product.id, { sortOrder: order })),
+    );
+    await refreshProducts?.();
+    await loadAll();
+  }
+
+  async function clearAllDataAndToast() {
+    const confirmMessages = [
+      '確定清空所有數據？',
+      '你真的要確定喔？',
+      '你有問過歌姬了嗎？',
+      '真的確定歌姬說可以刪掉了嗎？',
+      '你現在還有住手的機會，最後一次！',
+    ];
+    const allConfirmed = confirmMessages.every((message) => window.confirm(message));
+    if (!allConfirmed) return;
+
+    await db.transaction('rw', [
+      db.events, db.categories, db.products,
+      db.bonusRules, db.paymentMethods, db.preOrders, db.transactions,
+    ], async () => {
+      await Promise.all([
+        db.events.clear(),
+        db.categories.clear(),
+        db.products.clear(),
+        db.bonusRules.clear(),
+        db.paymentMethods.clear(),
+        db.preOrders.clear(),
+        db.transactions.clear(),
+      ]);
+    });
+
+    await ensureSeedData();
+    toast.show(getString('A6'));
+    await refreshProducts?.();
+    await loadAll();
   }
 
   useEffect(() => {
@@ -149,6 +372,14 @@ export default function AdminProducts({ products = [], refreshProducts }) {
   }
 
   function startEdit(product) {
+    if ((product.type ?? 'single') === 'bundle') {
+      // 套組的建立和編輯都在活動頁
+      setAdminTab('events');
+      const rule = bundleRuleForProduct(product.id);
+      if (rule) startEditBonusRule(rule);
+      else toast.show(t('admin.bundleEditHint'));
+      return;
+    }
     setActiveProductId(product.id);
     setDraft({
       id: product.id,
@@ -241,6 +472,9 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     if (!draft) return;
     if (!draft.name.trim()) return;
 
+    const existingProduct = activeProductId ? products.find((p) => p.id === activeProductId) ?? null : null;
+    const isArchiving = !!activeProductId && !!draft.archived && !existingProduct?.archived;
+
     const stock = draft.stock === '' || draft.stock === null ? null : normalizeStockInput(draft.stock);
     const payload = {
       id: draft.id,
@@ -265,82 +499,265 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     await refreshProducts?.();
     await loadAll();
 
-    // 商品存檔成功（手動新增/編輯）
-    toast.show('商品新增成功！✅');
+    toast.show(isArchiving ? '封存商品成功✅！' : '商品新增成功！✅');
   }
 
-  async function onDelete(productId) {
-    const ok = window.confirm('確定刪除該商品嗎？');
-    if (!ok) return;
-    await db.products.delete(productId);
-    await refreshProducts?.();
-    await loadAll();
+  // ─── 活動（滿額禮／合購折扣／套組活動） ─────────────────────
+  const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  function bundleRuleForProduct(productId) {
+    return bonusRules.find((r) => r.triggerType === 'bundle' && r.productId === productId) ?? null;
   }
 
-  function startNewBonusRule() {
+  function emptyActivityDraft(kind) {
     const nextSortOrder = (bonusRules.at(-1)?.sortOrder ?? 0) + 1;
-    setBonusDraft({
-      id: createUUID(),
-      name: '',
-      enabled: true,
-      triggerType: 'amount',
-      exclusiveGroup: '',
-      sortOrder: nextSortOrder,
-      categoryId: null,
-      triggerAmount: 0,
-      triggerProductIds: [],
-      triggerProductQty: 1,
-      bonusText: '',
+    const base = { id: createUUID(), kind, isExisting: false, name: '', enabled: true, exclusiveGroup: '', sortOrder: nextSortOrder };
+    if (kind === 'combo') {
+      return { ...base, slots: [makeEmptySlot('qty')], rewardType: 'price', comboPrice: 0, bonusText: '' };
+    }
+    if (kind === 'bundle') {
+      return {
+        ...base,
+        bundle: {
+          productId: createUUID(), price: 0, stock: null, categoryIds: [],
+          color: COLOR_PRESETS[0], imageUrl: null, bundleSlots: [makeEmptySlot('pickQty')],
+        },
+      };
+    }
+    return { ...base, categoryId: null, triggerAmount: 0, bonusText: '' };
+  }
+
+  function startNewBonusRule(kind = 'amount') {
+    setBonusDraft(emptyActivityDraft(kind));
+  }
+
+  function changeActivityKind(kind) {
+    setBonusDraft((prev) => {
+      if (!prev || prev.isExisting || prev.kind === kind) return prev;
+      return { ...emptyActivityDraft(kind), id: prev.id, name: prev.name, sortOrder: prev.sortOrder };
     });
   }
 
   function startEditBonusRule(rule) {
+    const kind = rule.triggerType === 'bundle' ? 'bundle' : rule.triggerType === 'combo' ? 'combo' : 'amount';
+    const base = {
+      id: rule.id, kind, isExisting: true,
+      name: rule.name ?? '', enabled: rule.enabled !== false,
+      exclusiveGroup: rule.exclusiveGroup ?? '', sortOrder: rule.sortOrder ?? 9999,
+    };
+    if (kind === 'combo') {
+      setBonusDraft({
+        ...base,
+        slots: (rule.slots ?? []).map((s) => ({ ...s })),
+        rewardType: rule.rewardType === 'price' ? 'price' : 'gift',
+        comboPrice: rule.comboPrice ?? 0,
+        bonusText: rule.bonusText ?? '',
+      });
+      return;
+    }
+    if (kind === 'bundle') {
+      const product = productsById.get(rule.productId) ?? null;
+      setBonusDraft({
+        ...base,
+        name: product?.name ?? rule.name ?? '',
+        bundle: {
+          productId: rule.productId,
+          price: product?.price ?? 0,
+          stock: typeof product?.stock === 'number' ? product.stock : null,
+          categoryIds: product?.categoryIds ?? [],
+          color: product?.color ?? COLOR_PRESETS[0],
+          imageUrl: product?.imageUrl ?? null,
+          bundleSlots: (product?.bundleSlots ?? []).map((s) => ({ ...s })),
+        },
+      });
+      return;
+    }
     setBonusDraft({
-      ...rule,
-      exclusiveGroup: rule.exclusiveGroup ?? '',
+      ...base,
       categoryId: rule.categoryId ?? null,
       triggerAmount: rule.triggerAmount ?? 0,
-      triggerProductIds: Array.isArray(rule.triggerProductIds) ? rule.triggerProductIds : [],
-      triggerProductQty: rule.triggerProductQty ?? 1,
       bonusText: rule.bonusText ?? '',
     });
   }
 
+  function slotsValid(slots, qtyKey) {
+    return Array.isArray(slots) && slots.length > 0
+      && slots.every((s) => (parseInt(s[qtyKey], 10) || 0) >= 1 && Array.isArray(s.poolProductIds) && s.poolProductIds.length > 0);
+  }
+
+  const activeSingleProductIds = useMemo(
+    () => new Set(products.filter((p) => !isArchivedProduct(p) && (p.type ?? 'single') === 'single').map((p) => p.id)),
+    [products],
+  );
+
+  /** 內容物被封存或刪除 → 活動列表標 ⚠️ */
+  function ruleHasInvalidComponents(rule) {
+    const poolBad = (slots) => (slots ?? []).some((s) => (s.poolProductIds ?? []).some((id) => !activeSingleProductIds.has(id)));
+    if (rule.triggerType === 'combo') return poolBad(rule.slots);
+    if (rule.triggerType === 'bundle') {
+      const p = productsById.get(rule.productId);
+      if (!p || isArchivedProduct(p)) return true;
+      return poolBad(p.bundleSlots);
+    }
+    return false;
+  }
+
+  function describeRule(rule) {
+    if (rule.triggerType === 'bundle') {
+      const p = productsById.get(rule.productId);
+      const slots = (p?.bundleSlots ?? []).map((s) => `${s.label || t('bundle.contents')}×${s.pickQty ?? 1}`).join('、');
+      return { typeLabel: t('admin.type.bundle'), detail: `NT$${p?.price ?? 0}・${slots || '—'}`, text: '' };
+    }
+    if (rule.triggerType === 'combo') {
+      const slots = (rule.slots ?? []).map((s) => `${s.label || t('bundle.contents')}×${s.qty ?? 1}`).join('＋');
+      const mode = rule.rewardType === 'price' ? `${t('admin.rewardPrice')} NT$${rule.comboPrice ?? 0}` : t('admin.rewardGift');
+      return { typeLabel: t('admin.type.combo'), detail: `${slots || '—'}・${mode}`, text: rule.rewardType === 'price' ? '' : (rule.bonusText ?? '') };
+    }
+    const cat = rule.categoryId ? (categories.find((c) => c.id === rule.categoryId)?.name ?? '') : t('admin.amountAll');
+    return { typeLabel: t('admin.type.amount'), detail: `${cat}・門檻 NT$${rule.triggerAmount ?? 0}`, text: rule.bonusText ?? '' };
+  }
+
+  const comboNotCheaper = useMemo(() => {
+    if (!bonusDraft || bonusDraft.kind !== 'combo' || bonusDraft.rewardType !== 'price') return false;
+    const min = minFillPrice(bonusDraft.slots, productsById);
+    return min !== null && Number(bonusDraft.comboPrice) >= min;
+  }, [bonusDraft, productsById]);
+
   async function saveBonusRule() {
     if (!bonusDraft) return;
-    if (!String(bonusDraft.name ?? '').trim()) return;
-    if (!String(bonusDraft.bonusText ?? '').trim()) return;
-    if (bonusDraft.triggerType === 'amount' && (!Number.isFinite(Number(bonusDraft.triggerAmount)) || Number(bonusDraft.triggerAmount) <= 0)) {
+    const name = String(bonusDraft.name ?? '').trim();
+    if (!name) {
+      toast.show(t('admin.err.name'), 'error');
       return;
     }
-    if (bonusDraft.triggerType === 'product' && (!Array.isArray(bonusDraft.triggerProductIds) || bonusDraft.triggerProductIds.length === 0)) {
-      return;
-    }
-
-    const payload = {
-      ...bonusDraft,
-      name: String(bonusDraft.name).trim(),
+    const common = {
+      id: bonusDraft.id,
+      name,
       enabled: !!bonusDraft.enabled,
       exclusiveGroup: String(bonusDraft.exclusiveGroup ?? '').trim() || null,
       sortOrder: Number.isFinite(Number(bonusDraft.sortOrder)) ? Number(bonusDraft.sortOrder) : 9999,
-      categoryId: bonusDraft.triggerType === 'amount' ? (bonusDraft.categoryId || null) : null,
-      triggerAmount: bonusDraft.triggerType === 'amount' ? Math.max(0, parseInt(bonusDraft.triggerAmount, 10) || 0) : undefined,
-      triggerProductIds: bonusDraft.triggerType === 'product' ? bonusDraft.triggerProductIds : [],
-      triggerProductQty: bonusDraft.triggerType === 'product' ? Math.max(1, parseInt(bonusDraft.triggerProductQty, 10) || 1) : undefined,
-      bonusText: String(bonusDraft.bonusText).trim(),
     };
 
-    await db.bonusRules.put(payload);
+    if (bonusDraft.kind === 'amount') {
+      if (!Number.isFinite(Number(bonusDraft.triggerAmount)) || Number(bonusDraft.triggerAmount) <= 0) {
+        toast.show(t('admin.err.threshold'), 'error');
+        return;
+      }
+      if (!String(bonusDraft.bonusText ?? '').trim()) {
+        toast.show(t('admin.err.bonusText'), 'error');
+        return;
+      }
+      await db.bonusRules.put({
+        ...common,
+        triggerType: 'amount',
+        categoryId: bonusDraft.categoryId || null,
+        triggerAmount: Math.max(0, parseInt(bonusDraft.triggerAmount, 10) || 0),
+        bonusText: String(bonusDraft.bonusText).trim(),
+      });
+    } else if (bonusDraft.kind === 'combo') {
+      const slots = (bonusDraft.slots ?? []).map((s) => ({
+        id: s.id ?? createUUID(), label: String(s.label ?? '').trim(),
+        qty: Math.max(1, parseInt(s.qty, 10) || 1), poolProductIds: [...new Set(s.poolProductIds ?? [])],
+      }));
+      if (!slotsValid(slots, 'qty')) {
+        toast.show(t('admin.err.slots'), 'error');
+        return;
+      }
+      const isPrice = bonusDraft.rewardType === 'price';
+      const totalQty = slots.reduce((s, x) => s + x.qty, 0);
+      if (isPrice && totalQty < 2) {
+        toast.show(t('admin.err.comboQty'), 'error');
+        return;
+      }
+      const comboPrice = Math.max(0, parseInt(bonusDraft.comboPrice, 10) || 0);
+      if (isPrice && (!Number.isFinite(Number(bonusDraft.comboPrice)) || Number(bonusDraft.comboPrice) < 0)) {
+        toast.show(t('admin.err.comboPrice'), 'error');
+        return;
+      }
+      if (!isPrice && !String(bonusDraft.bonusText ?? '').trim()) {
+        toast.show(t('admin.err.bonusText'), 'error');
+        return;
+      }
+      await db.bonusRules.put({
+        ...common,
+        triggerType: 'combo',
+        slots,
+        rewardType: isPrice ? 'price' : 'gift',
+        comboPrice: isPrice ? comboPrice : null,
+        bonusText: String(bonusDraft.bonusText ?? '').trim(),
+      });
+    } else if (bonusDraft.kind === 'bundle') {
+      const b = bonusDraft.bundle;
+      const price = parseInt(b.price, 10);
+      if (!Number.isFinite(price) || price < 0) {
+        toast.show(t('admin.err.bundlePrice'), 'error');
+        return;
+      }
+      const bundleSlots = (b.bundleSlots ?? []).map((s) => ({
+        id: s.id ?? createUUID(), label: String(s.label ?? '').trim(),
+        pickQty: Math.max(1, parseInt(s.pickQty, 10) || 1),
+        poolProductIds: [...new Set(s.poolProductIds ?? [])].filter((id) => activeSingleProductIds.has(id) || productsById.has(id)),
+        allowDuplicate: s.allowDuplicate !== false,
+      }));
+      if (!slotsValid(bundleSlots, 'pickQty')) {
+        toast.show(t('admin.err.slots'), 'error');
+        return;
+      }
+      // 套組商品與活動規則包在同一個 transaction
+      await db.transaction('rw', db.products, db.bonusRules, async () => {
+        const existing = await db.products.get(b.productId);
+        await db.products.put({
+          ...(existing ?? { isNew: false, archived: false }),
+          id: b.productId,
+          name,
+          price,
+          stock: b.stock === '' || b.stock === null ? null : normalizeStockInput(b.stock),
+          categoryIds: b.categoryIds ?? [],
+          color: b.color || COLOR_PRESETS[0],
+          imageUrl: b.imageUrl ?? null,
+          type: 'bundle',
+          bundleSlots,
+        });
+        await db.bonusRules.put({
+          ...common,
+          exclusiveGroup: null,
+          triggerType: 'bundle',
+          productId: b.productId,
+        });
+      });
+    }
+
     setBonusDraft(null);
+    await refreshProducts?.();
     await loadAll();
-    toast.show('活動規則已儲存');
+    toast.show(t('admin.activitySaved'), 'success');
   }
 
-  async function deleteBonusRule(ruleId) {
-    const ok = window.confirm('確定刪除這條活動規則嗎？');
-    if (!ok) return;
-    await db.bonusRules.delete(ruleId);
+  async function deleteBonusRule(rule) {
+    if (rule.triggerType === 'bundle') {
+      if (!window.confirm(t('admin.bundleDeleteConfirm1'))) return;
+      if (!window.confirm(t('admin.bundleDeleteConfirm2'))) return;
+      const txs = await db.transactions.toArray();
+      const hasHistory = txs.some((tx) => (tx.items ?? []).some((it) => it.productId === rule.productId));
+      await db.transaction('rw', db.products, db.bonusRules, async () => {
+        if (hasHistory) {
+          // 有歷史交易：改成封存，不刪除（報表還對得到名稱）
+          await db.products.update(rule.productId, { archived: true });
+          await db.bonusRules.update(rule.id, { enabled: false });
+        } else {
+          await db.products.delete(rule.productId);
+          await db.bonusRules.delete(rule.id);
+        }
+      });
+      await refreshProducts?.();
+      await loadAll();
+      toast.show(hasHistory ? t('admin.bundleArchivedInstead') : t('admin.activityDeleted'));
+      return;
+    }
+    if (!window.confirm(t('admin.activityDeleteConfirm'))) return;
+    await db.bonusRules.delete(rule.id);
     await loadAll();
+    toast.show(t('admin.activityDeleted'));
   }
 
   function startNewPaymentMethod() {
@@ -392,21 +809,47 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     return `${cleanName}_${yymmdd}`;
   }
 
-  async function createEvent() {
-    const displayName = formatEventDisplayName(eventName, eventDate);
-    if (!displayName || !eventDate) return;
-    await db.events.add({
-      id: createUUID(),
-      name: displayName,
-      date: eventDate,
-      status: 'inactive',
-      archived: false,
-      createdAt: Date.now(),
+  function startNewEvent() {
+    setEventDraft({
+      id: null,
+      name: '',
+      date: '',
     });
-    setEventName('');
-    setEventDate('');
+  }
+
+  function startEditEvent(evt) {
+    const rawName = String(evt.name ?? '').includes('_')
+      ? String(evt.name).split('_').slice(0, -1).join('_')
+      : String(evt.name ?? '');
+    setEventDraft({
+      id: evt.id,
+      name: rawName,
+      date: evt.date ?? '',
+    });
+  }
+
+  async function saveEvent() {
+    if (!eventDraft) return;
+    const displayName = formatEventDisplayName(eventDraft.name, eventDraft.date);
+    if (!displayName || !eventDraft.date) return;
+
+    if (eventDraft.id) {
+      await db.events.update(eventDraft.id, { name: displayName, date: eventDraft.date });
+      toast.show('場次已更新');
+    } else {
+      await db.events.add({
+        id: createUUID(),
+        name: displayName,
+        date: eventDraft.date,
+        status: 'inactive',
+        archived: false,
+        createdAt: Date.now(),
+      });
+      toast.show('場次已新增');
+    }
+
+    setEventDraft(null);
     await loadAll();
-    toast.show('活動已新增');
   }
 
   async function setActiveEvent(eventId) {
@@ -419,13 +862,13 @@ export default function AdminProducts({ products = [], refreshProducts }) {
       ),
     );
     await loadAll();
-    toast.show('已切換活動');
+    toast.show('已切換場次');
   }
 
   async function archiveEvent(eventId) {
     const target = events.find((e) => e.id === eventId);
     if (!target) return;
-    const ok = window.confirm(`確定封存活動「${target.name}」？`);
+    const ok = window.confirm(`確定封存場次「${target.name}」？`);
     if (!ok) return;
 
     await db.events.update(eventId, { archived: true, status: 'inactive' });
@@ -438,21 +881,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
       if (fallback) await db.events.update(fallback.id, { status: 'active' });
     }
     await loadAll();
-    toast.show('活動已封存');
-  }
-
-  async function editEvent(eventId) {
-    const target = events.find((e) => e.id === eventId);
-    if (!target) return;
-    const rawName = window.prompt('活動名稱（不含日期）', String(target.name ?? '').split('-').slice(0, -1).join('-') || target.name);
-    if (rawName === null) return;
-    const rawDate = window.prompt('活動日期（YYYY-MM-DD）', target.date ?? '');
-    if (rawDate === null) return;
-    const displayName = formatEventDisplayName(rawName, rawDate);
-    if (!displayName) return;
-    await db.events.update(eventId, { name: displayName, date: rawDate });
-    await loadAll();
-    toast.show('活動已更新');
+    toast.show('場次已封存');
   }
 
   function downloadTemplate() {
@@ -534,7 +963,6 @@ export default function AdminProducts({ products = [], refreshProducts }) {
             sortOrder: (existingCats.length + createdCatIds.length) + 1,
             createdAt: Date.now(),
           };
-          // eslint-disable-next-line no-await-in-loop
           await db.categories.add(cat);
           catByName.set(cn, cat);
           createdCatIds.push(cat.id);
@@ -549,6 +977,8 @@ export default function AdminProducts({ products = [], refreshProducts }) {
       const archived = pickField(r, ['archived']) === '' ? !!existing?.archived : parseBool(pickField(r, ['archived']));
 
       const payload = {
+        // 保留既有商品的其他欄位（sortOrder、type、bundleSlots…），CSV 只覆蓋它有的欄位
+        ...(existing ?? { type: 'single' }),
         id: existing?.id || (crypto?.randomUUID ? crypto.randomUUID() : createUUID()),
         name: normalizedName,
         price: parseInt(String(price), 10),
@@ -577,56 +1007,31 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     toast.show(`匯入完成（新增 ${createdCount}、更新 ${updatedCount}；編碼: ${encoding}）`);
   }
 
-  const draftCategoryNames = useMemo(() => {
-    if (!draft) return '';
-    const ids = draft.categoryIds ?? [];
-    return ids.map((id) => categories.find((c) => c.id === id)?.name).filter(Boolean).join(';');
-  }, [draft, categories]);
-
   return (
     <div style={styles.page}>
       {/* ── Admin Tab Bar ── */}
-      <div style={{ padding: '0 14px 0' }}>
-        <div style={{ fontSize: 11, fontWeight: 900, color: '#9A8898', letterSpacing: '0.08em', marginBottom: 10 }}>
-          後台管理
+      <div style={{ padding: '0 6px 0 0' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: ui.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+          {t('admin.pageLabel')}
         </div>
         <div
           style={{
             display: 'flex',
-            gap: 4,
-            padding: '0 4px 12px',
-            borderBottom: '1px solid rgba(0,0,0,0.06)',
+            gap: 8,
+            padding: '0 0 12px',
             marginBottom: 12,
           }}
         >
           {[
-            { id: 'products', label: '商品' },
-            { id: 'events',   label: '場次&特典' },
-            { id: 'system',   label: '系統' },
+            { id: 'products', label: t('admin.tab.products') },
+            { id: 'events',   label: t('admin.tab.events') },
+            { id: 'system',   label: t('admin.tab.system') },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setAdminTab(tab.id)}
-              style={{
-                flex: 1,
-                padding: '10px 8px',
-                borderRadius: 20,
-                fontWeight: 800,
-                fontSize: 13,
-                border: adminTab === tab.id
-                  ? '1.5px solid rgba(255,255,255,0.30)'
-                  : '1.5px solid rgba(255,255,255,0.58)',
-                backgroundColor: adminTab === tab.id ? '#80A1D4' : 'rgba(255,255,255,0.38)',
-                WebkitBackdropFilter: 'blur(10px)',
-                backdropFilter: 'blur(10px)',
-                color: adminTab === tab.id ? '#FFFFFF' : '#9A8898',
-                cursor: 'pointer',
-                boxShadow: adminTab === tab.id
-                  ? '0 6px 18px rgba(128,161,212,0.36)'
-                  : '0 1px 8px rgba(180,140,220,0.10)',
-                transition: 'all 0.18s ease',
-              }}
+              style={{ ...styles.chip(adminTab === tab.id), flex: 1, minHeight: 40 }}
             >
               {tab.label}
             </button>
@@ -640,20 +1045,11 @@ export default function AdminProducts({ products = [], refreshProducts }) {
           title={t('admin.title')}
           subtitle={`${showArchived ? t('admin.showArchivedLabel') : t('admin.showSellingLabel')} · ${filteredProducts.length} 件`}
           action={(
-            <div style={{ display: 'flex', gap: 16 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end', padding: '0 4px 4px 0' }}>
               <button
                 type="button"
                 onClick={() => setShowArchived((v) => !v)}
-                style={{
-                  borderRadius: 24,
-                  padding: '12px 14px',
-                  fontWeight: 800,
-                  border: 'none',
-                  background: showArchived ? ui.primary : 'rgba(255, 255, 255, 0.45)',
-                  color: showArchived ? '#FFFFFF' : ui.muted,
-                  cursor: 'pointer',
-                  boxShadow: showArchived ? '0 10px 22px rgba(128, 161, 212, 0.38)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
-                }}
+                style={{ ...styles.chip(showArchived), minHeight: 44 }}
               >
                 {showArchived ? t('admin.showSellingToggle') : t('admin.showArchivedToggle')}
               </button>
@@ -664,7 +1060,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
           )}
         />
 
-        <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
+        <div style={{ marginTop: 14, display: 'flex', gap: 16 }}>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -679,81 +1075,46 @@ export default function AdminProducts({ products = [], refreshProducts }) {
       <div style={{ padding: 14 }}>
         <div style={styles.formCard}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-            <div style={{ fontWeight: 900, fontSize: 16, color: ui.ink, borderLeft: '3px solid #80A1D4', paddingLeft: 10 }}>場次管理</div>
+            <div>
+              <div style={styles.h2}>{t('admin.eventsTitle')}</div>
+            <div style={styles.h2Bar} />
+              <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12, marginTop: 6 }}>
+                {t('admin.eventsSubtitle')}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={startNewEvent}
+              style={styles.btnPrimary}
+            >
+              {t('admin.newEvent')}
+            </button>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
             <button
               type="button"
               onClick={() => setShowArchivedEvents((v) => !v)}
-              style={{
-                borderRadius: 24,
-                padding: '8px 12px',
-                fontWeight: 800,
-                border: 'none',
-                color: showArchivedEvents ? '#FFFFFF' : ui.muted,
-                background: showArchivedEvents ? ui.primary : 'rgba(255, 255, 255, 0.45)',
-                boxShadow: showArchivedEvents ? '0 10px 22px rgba(128, 161, 212, 0.38)' : styles.shadow,
-                cursor: 'pointer',
-              }}
+              style={styles.chip(showArchivedEvents)}
             >
-              {showArchivedEvents ? '隱藏封存活動' : '查看封存活動'}
+              {showArchivedEvents ? t('admin.hideArchivedEvents') : t('admin.showArchivedEvents')}
             </button>
           </div>
-          <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 6 }}>
-            新增場次時會自動命名為「場次名稱_YYMMDD」。
-          </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-            <input
-              value={eventName}
-              onChange={(e) => setEventName(e.target.value)}
-              placeholder="活動名稱（例如 CWT72 或 WCSxCWT_D1）"
-              style={{ ...styles.input, flex: 1 }}
-            />
-            <input
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-              style={{ ...styles.input, flex: 1 }}
-            />
-            <button
-              type="button"
-              onClick={() => createEvent().catch((e) => console.error(e))}
-              style={{
-                borderRadius: 28,
-                padding: '12px 14px',
-                border: 'none',
-                background: ui.primary,
-                color: '#FFFFFF',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: styles.shadow,
-              }}
-            >
-              新增
-            </button>
-          </div>
-          <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+          <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
             {events
               .filter((evt) => (showArchivedEvents ? !!evt.archived : !evt.archived))
               .map((evt) => (
-              <div key={evt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, background: 'rgba(255,255,255,0.50)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderRadius: 10, padding: '10px 12px' }}>
+              <div key={evt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', ...styles.rowCard }}>
                 <div>
                   <div style={{ fontWeight: 800, color: ui.ink }}>{evt.name}</div>
-                  <div style={{ fontWeight: 700, color: '#9A8898', fontSize: 12 }}>{evt.date}{evt.archived ? ' · 已封存' : ''}</div>
+                  <div style={{ fontWeight: 700, color: ui.muted, fontSize: 12 }}>{evt.date}{evt.archived ? ` · ${t('common.archive')}` : ''}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     type="button"
-                    onClick={() => editEvent(evt.id).catch((e) => console.error(e))}
-                    style={{
-                      color: '#9A8898',
-                      border: '1px solid rgba(0,0,0,0.10)',
-                      background: '#fff',
-                      borderRadius: 8,
-                      padding: '6px 10px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
+                    onClick={() => startEditEvent(evt)}
+                    style={styles.btnSmall}
                   >
-                    修改
+                    {t('common.edit')}
                   </button>
                   {!evt.archived ? (
                     <>
@@ -761,32 +1122,18 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                         type="button"
                         onClick={() => setActiveEvent(evt.id).catch((e) => console.error(e))}
                         style={{
-                          borderRadius: 24,
-                          border: 'none',
-                          padding: '8px 12px',
-                          fontWeight: 800,
-                          color: evt.status === 'active' ? '#FFFFFF' : '#9A8898',
-                          background: evt.status === 'active' ? ui.primary : '#FFFFFF',
-                          boxShadow: styles.shadow,
-                          cursor: 'pointer',
+                          ...styles.btnSmall,
+                          background: evt.status === 'active' ? ui.orange : ui.white,
                         }}
                       >
-                        {evt.status === 'active' ? '目前活動' : '設為活動'}
+                        {evt.status === 'active' ? t('admin.eventActive') : t('admin.eventSetActive')}
                       </button>
                       <button
                         type="button"
                         onClick={() => archiveEvent(evt.id).catch((e) => console.error(e))}
-                        style={{
-                          color: '#80A1D4',
-                          border: '1px solid rgba(128,161,212,0.3)',
-                          background: '#fff9f9',
-                          borderRadius: 8,
-                          padding: '6px 10px',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
+                        style={styles.btnSmallDanger}
                       >
-                        封存
+                        {t('common.archive')}
                       </button>
                     </>
                   ) : null}
@@ -794,86 +1141,85 @@ export default function AdminProducts({ products = [], refreshProducts }) {
               </div>
             ))}
             {events.filter((evt) => (showArchivedEvents ? !!evt.archived : !evt.archived)).length === 0
-              ? <EmptyState icon="📅" title={showArchivedEvents ? '沒有封存活動' : '尚未建立活動'} />
+              ? <EmptyState icon="📅" title={showArchivedEvents ? t('admin.noArchivedEvents') : t('admin.noEvents')} />
               : null}
           </div>
+
+          {eventDraft ? (
+            <div style={{ marginTop: 20, paddingTop: 16, width: '100%', minWidth: 0 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>{eventDraft.id ? t('admin.eventEdit') : t('admin.eventNew')}</div>
+              <input
+                value={eventDraft.name}
+                onChange={(e) => setEventDraft((prev) => ({ ...prev, name: e.target.value }))}
+                style={styles.input}
+                placeholder={t('admin.eventNamePlaceholder')}
+              />
+              <input
+                type="date"
+                value={eventDraft.date}
+                onChange={(e) => setEventDraft((prev) => ({ ...prev, date: e.target.value }))}
+                style={{ ...styles.input, marginTop: 10 }}
+              />
+              <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+                <button type="button" onClick={() => setEventDraft(null)} style={styles.btnSecondary}>
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveEvent().catch((e) => console.error(e))}
+                  style={styles.btnPrimary}
+                >
+                  {t('admin.eventSave')}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
       )}
 
       {adminTab === 'products' && (
       <div style={{ padding: 14 }}>
-        <div style={styles.grid}>
-          {filteredProducts.map((p) => {
-            const stock = typeof p.stock === 'number' ? p.stock : null;
-            return (
-              <div key={p.id} onClick={() => startEdit(p)} style={{ cursor: 'pointer' }}>
-                <ProductCard
-                  product={{
-                    ...p,
-                    stock,
-                    categoryIds: p.categoryIds ?? [],
-                    isNew: p.isNew,
-                    imageUrl: p.imageUrl ?? null,
-                    archived: p.archived,
-                  }}
-                  cartQty={0}
-                  onClick={() => startEdit(p)}
-                />
-              </div>
-            );
-          })}
+        <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12, marginTop: 6, lineHeight: 1.5, textAlign: 'right' }}>
+          {t('admin.dragHint')}
         </div>
+        <DraggableProductGrid
+          orderedProducts={orderedProducts}
+          onEdit={startEdit}
+          onReorder={(fromId, toId) => reorderProducts(fromId, toId).catch((err) => console.error(err))}
+        />
 
         {filteredProducts.length === 0 ? (
-          <div style={{ padding: 20, color: '#9A8898', fontWeight: 800 }}>{t('admin.noProducts')}</div>
+          <div style={{ padding: 20, color: ui.muted, fontWeight: 800 }}>{t('admin.noProducts')}</div>
         ) : null}
       </div>
       )}
 
       {/* Form */}
       {draft ? (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-            zIndex: 3000,
-            display: 'flex',
-            alignItems: 'flex-end',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              padding: 26,
-              borderRadius: '28px 28px 0 0',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              boxShadow:
-                '0 -16px 44px rgba(0,0,0,0.1), 0 20px 40px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.03)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-              <div style={{ fontWeight: 900, fontSize: 16, borderLeft: '3px solid #80A1D4', paddingLeft: 10 }}>{activeProductId ? t('admin.editTitle') : t('admin.addTitle')}</div>
-              <button type="button" style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9A8898', fontWeight: 900 }} onClick={() => setDraft(null)}>
-                {t('admin.form.cancel')}
-              </button>
+        <div style={styles.overlay}>
+          <div style={styles.sheet}>
+            {/* 復古視窗標題列：杏色色帶＋黑色底線＋右側關閉鈕 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, margin: '-20px -20px 0', padding: '10px 14px 10px 20px', ...surface.titleBar }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{activeProductId ? t('admin.editTitle') : t('admin.addTitle')}</div>
+              <Button variant="secondary" size="sm" onClick={() => setDraft(null)} aria-label={t('admin.form.cancel')}>
+                ✕
+              </Button>
             </div>
 
-            <div style={{ ...styles.formCard, marginTop: 12 }}>
-              <div style={{ fontWeight: 900, fontSize: 12, color: ui.ink, marginBottom: 8 }}>{t('admin.photoSection')}</div>
+            <div style={{ ...styles.formCard, marginTop: 16 }}>
+              <div style={styles.label}>{t('admin.photoSection')}</div>
 
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                 <div
                   style={{
                     width: 110,
                     height: 110,
-                    borderRadius: 16,
-                    border: 'none',
+                    borderRadius: 10,
+                    border: border.solidSm,
                     overflow: 'hidden',
-                    backgroundColor: draft.color || '#F5F5F5',
-                    boxShadow: styles.shadow,
+                    backgroundColor: draft.color || ui.mint,
+                    boxShadow: shadow.sm,
                     position: 'relative',
                     flexShrink: 0,
                   }}
@@ -881,7 +1227,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                   {draft.imageUrl ? (
                     <img src={draft.imageUrl} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: '#9A8898' }}>
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: ui.muted }}>
                       {t('admin.tapUpload')}
                     </div>
                   )}
@@ -904,51 +1250,27 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                 </div>
 
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '0 4px 4px 0' }}>
                     <button
                       type="button"
                       onClick={() => setDraft((prev) => ({ ...prev, imageUrl: null }))}
                       disabled={!draft.imageUrl}
-                      style={{
-                        border: 'none',
-                        backgroundColor: 'rgba(255,255,255,0.48)',
-                        backdropFilter: 'blur(8px)',
-                        WebkitBackdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(255,255,255,0.50)',
-                        borderRadius: 24,
-                        padding: '10px 14px',
-                        fontWeight: 800,
-                        cursor: draft.imageUrl ? 'pointer' : 'not-allowed',
-                        color: draft.imageUrl ? ui.primary : ui.muted,
-                        boxShadow: styles.shadow,
-                      }}
+                      style={draft.imageUrl ? styles.btnDanger : { ...styles.btnBase, ...buttonVariants.disabled }}
                     >
                       {t('admin.deleteImage')}
                     </button>
                     <button
                       type="button"
                       onClick={() => setDraft((prev) => ({ ...prev, color: COLOR_PRESETS[0] }))}
-                      style={{
-                        border: 'none',
-                        backgroundColor: 'rgba(255,255,255,0.48)',
-                        backdropFilter: 'blur(8px)',
-                        WebkitBackdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(255,255,255,0.50)',
-                        borderRadius: 24,
-                        padding: '10px 14px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        color: '#9A8898',
-                        boxShadow: styles.shadow,
-                      }}
+                      style={styles.btnSecondary}
                     >
                       {t('admin.deleteColor')}
                     </button>
                   </div>
 
-                  <div style={{ marginTop: 10 }}>
-                    <div style={styles.label}>背景顏色（9 種預設）</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                  <div style={{ marginTop: 12 }}>
+                    <div style={styles.label}>{t('admin.colorLabel')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: '2px 4px 4px 2px' }}>
                       {COLOR_PRESETS.map((c) => (
                         <div key={c} style={styles.swatch(draft.color === c, c)} onClick={() => setDraft((prev) => ({ ...prev, color: c }))} />
                       ))}
@@ -991,24 +1313,13 @@ export default function AdminProducts({ products = [], refreshProducts }) {
 
               <div style={{ marginTop: 12 }}>
                 <div style={styles.label}>{t('admin.categoryLabel')}</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '0 4px 4px 0' }}>
                   {categories.map((c) => (
                     <button
                       key={c.id}
                       type="button"
                       onClick={() => toggleCategory(c.id)}
-                      style={{
-                        borderRadius: 24,
-                        padding: '10px 14px',
-                        fontWeight: 800,
-                        border: 'none',
-                        background: draft.categoryIds.includes(c.id) ? ui.primary : 'rgba(255, 255, 255, 0.45)',
-                        color: draft.categoryIds.includes(c.id) ? '#FFFFFF' : ui.muted,
-                        cursor: 'pointer',
-                        boxShadow: draft.categoryIds.includes(c.id)
-                          ? '0 10px 22px rgba(128, 161, 212, 0.38)'
-                          : '0 2px 12px rgba(0, 0, 0, 0.06)',
-                      }}
+                      style={styles.chip(draft.categoryIds.includes(c.id))}
                     >
                       {c.name}
                     </button>
@@ -1027,7 +1338,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
               </div>
 
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 12 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 900 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 800 }}>
                   <input
                     type="checkbox"
                     checked={draft.isNew}
@@ -1035,7 +1346,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                   />
                     {t('admin.newBadgeLabel')}
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 900 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 800 }}>
                   <input
                     type="checkbox"
                     checked={draft.archived}
@@ -1045,38 +1356,18 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                 </label>
               </div>
 
-              <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
+              <div style={{ display: 'flex', gap: 12, marginTop: 16, padding: '0 6px 6px 0' }}>
                 <button
                   type="button"
                   onClick={() => setDraft(null)}
-                  style={{
-                    flex: 1,
-                    borderRadius: 24,
-                    padding: '14px 10px',
-                    border: 'none',
-                    backgroundColor: '#FFFFFF',
-                    fontWeight: 800,
-                    color: '#9A8898',
-                    cursor: 'pointer',
-                    boxShadow: styles.shadow,
-                  }}
+                  style={{ ...styles.btnSecondary, flex: 1 }}
                 >
                   {t('admin.form.cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={onSave}
-                  style={{
-                    flex: 1,
-                    borderRadius: 28,
-                    padding: '14px 10px',
-                    border: 'none',
-                    background: ui.primary,
-                    color: '#FFFFFF',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    boxShadow: '0 10px 22px rgba(128, 161, 212, 0.38)',
-                  }}
+                  style={{ ...styles.btnPrimary, flex: 1, fontSize: 16, fontWeight: 800, boxShadow: shadow.md }}
                 >
                   {t('admin.save')}
                 </button>
@@ -1092,28 +1383,18 @@ export default function AdminProducts({ products = [], refreshProducts }) {
           <div style={{ ...styles.formCard, marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 16, borderLeft: '3px solid #80A1D4', paddingLeft: 10 }}>商品大量匯入</div>
-                <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 6 }}>
-                  可匯出模板後填寫，再上傳 CSV。
+                <div style={styles.h2}>{t('admin.csv.title')}</div>
+            <div style={styles.h2Bar} />
+                <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12, marginTop: 6 }}>
+                  {t('admin.csv.subtitle')}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={downloadTemplate}
-                style={{
-                  borderRadius: 24,
-                  padding: '12px 14px',
-                  fontWeight: 800,
-                  border: 'none',
-                  backgroundColor: 'rgba(255,255,255,0.48)',
-                  backdropFilter: 'blur(8px)',
-                  WebkitBackdropFilter: 'blur(8px)',
-                  border: '1px solid rgba(255,255,255,0.52)',
-                  cursor: 'pointer',
-                  boxShadow: styles.shadow,
-                }}
+                style={styles.btnSecondary}
               >
-                模板下載
+                {t('admin.csv.template')}
               </button>
             </div>
 
@@ -1135,190 +1416,274 @@ export default function AdminProducts({ products = [], refreshProducts }) {
         </div>
       ) : null}
 
-      {/* Bonus rules */}
+      {/* 活動設定：滿額禮／合購折扣／套組活動 */}
       {adminTab === 'events' && !draft ? (
         <div style={{ padding: 14 }}>
           <div style={{ ...styles.formCard, marginTop: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 16, borderLeft: '3px solid #80A1D4', paddingLeft: 10 }}>特典設定</div>
-                <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 6 }}>
-                  可設定滿額贈、合購活動（商品觸發）。
-                </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <div style={styles.h2}>{t('admin.activityTitle')}</div>
+                <div style={styles.h2Bar} />
+                <div style={{ ...styles.caption, lineHeight: 1.5 }}>{t('admin.activitySubtitle')}</div>
               </div>
-              <button
-                type="button"
-                onClick={startNewBonusRule}
-                style={{
-                  borderRadius: 28,
-                  padding: '12px 14px',
-                  fontWeight: 800,
-                  border: 'none',
-                  background: ui.primary,
-                  color: '#FFFFFF',
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 22px rgba(128, 161, 212, 0.38)',
-                }}
-              >
-                ＋ 新增活動
+              <button type="button" onClick={() => startNewBonusRule('amount')} style={styles.btnPrimary}>
+                {t('admin.newActivity')}
               </button>
             </div>
 
-            <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-              {bonusRules.map((r) => (
-                <div key={r.id} style={{ background: 'rgba(255,255,255,0.50)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderRadius: 10, padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <div>
-                      <div style={{ fontWeight: 900 }}>{r.name}</div>
-                      <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12 }}>
-                        {r.triggerType === 'amount'
-                          ? `滿額贈・門檻 NT$${r.triggerAmount ?? 0}`
-                          : `合購活動・商品數量 ≥ ${r.triggerProductQty ?? 1}`}
+            <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+              {bonusRules.map((r) => {
+                const info = describeRule(r);
+                const invalid = ruleHasInvalidComponents(r);
+                return (
+                  <div key={r.id} style={{ ...styles.rowCard, opacity: r.enabled === false ? 0.6 : 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={styles.typeBadge}>{info.typeLabel}</span>
+                          <span style={{ fontWeight: 800 }}>{r.name}</span>
+                          {r.enabled === false ? <span style={styles.caption}>（停用）</span> : null}
+                          {invalid ? <span style={{ ...styles.typeBadge, background: ui.apricot }}>{t('admin.invalidComponents')}</span> : null}
+                        </div>
+                        <div style={{ ...styles.caption, marginTop: 4 }}>{info.detail}</div>
+                        {info.text ? <div style={{ fontWeight: 700, fontSize: 12, marginTop: 4 }}>{info.text}</div> : null}
                       </div>
-                      <div style={{ color: ui.ink, fontWeight: 800, fontSize: 12, marginTop: 4 }}>
-                        {r.bonusText}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" style={styles.btnSmall} onClick={() => startEditBonusRule(r)}>
+                          {t('common.edit')}
+                        </button>
+                        <button type="button" style={styles.btnSmallDanger} onClick={() => deleteBonusRule(r).catch((e) => { console.error(e); toast.show(t('admin.err.saveFailed'), 'error'); })}>
+                          {t('common.delete')}
+                        </button>
                       </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        type="button"
-                        style={{
-                          color: '#9A8898',
-                          border: '1px solid rgba(0,0,0,0.10)',
-                          background: '#fff',
-                          borderRadius: 8,
-                          padding: '6px 10px',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => startEditBonusRule(r)}
-                      >
-                        編輯
-                      </button>
-                      <button
-                        type="button"
-                        style={{
-                          color: '#80A1D4',
-                          border: '1px solid rgba(128,161,212,0.3)',
-                          background: '#fff9f9',
-                          borderRadius: 8,
-                          padding: '6px 10px',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => deleteBonusRule(r.id)}
-                      >
-                        刪除
-                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {bonusRules.length === 0
-                ? <EmptyState icon="🎁" title="尚未設定活動規則" subtitle="新增特典觸發規則" />
+                ? <EmptyState icon="🎁" title={t('admin.noActivities')} subtitle={t('admin.noActivitiesHint')} />
                 : null}
             </div>
 
             {bonusDraft ? (
-              <div style={{ marginTop: 20, paddingTop: 16 }}>
-                <div style={{ fontWeight: 900, marginBottom: 8 }}>編輯活動</div>
-                <input
-                  value={bonusDraft.name}
-                  onChange={(e) => setBonusDraft((prev) => ({ ...prev, name: e.target.value }))}
-                  style={styles.input}
-                  placeholder="活動名稱"
-                />
-                <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                  <select
-                    value={bonusDraft.triggerType}
-                    onChange={(e) => setBonusDraft((prev) => ({ ...prev, triggerType: e.target.value }))}
-                    style={{ ...styles.input, flex: 1 }}
-                  >
-                    <option value="amount">滿額贈</option>
-                    <option value="product">合購活動（商品觸發）</option>
-                  </select>
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: `2px solid ${ui.ink}`, width: '100%', minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 10 }}>{t('admin.editActivity')}</div>
+
+                <div style={styles.label}>{t('admin.activityType')}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 4px 4px 0' }}>
+                  {['amount', 'combo', 'bundle'].map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      style={{ ...styles.chip(bonusDraft.kind === k), opacity: bonusDraft.isExisting && bonusDraft.kind !== k ? 0.4 : 1 }}
+                      disabled={bonusDraft.isExisting && bonusDraft.kind !== k}
+                      onClick={() => changeActivityKind(k)}
+                    >
+                      {t(`admin.type.${k}`)}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={styles.label}>{bonusDraft.kind === 'bundle' ? t('admin.bundleName') : t('admin.activityName')}</div>
                   <input
-                    value={bonusDraft.exclusiveGroup}
-                    onChange={(e) => setBonusDraft((prev) => ({ ...prev, exclusiveGroup: e.target.value }))}
-                    style={{ ...styles.input, flex: 1 }}
-                    placeholder="互斥群組（可留空）"
+                    value={bonusDraft.name}
+                    onChange={(e) => setBonusDraft((prev) => ({ ...prev, name: e.target.value }))}
+                    style={styles.input}
                   />
                 </div>
 
-                {bonusDraft.triggerType === 'amount' ? (
-                  <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                    <select
-                      value={bonusDraft.categoryId ?? ''}
-                      onChange={(e) => setBonusDraft((prev) => ({ ...prev, categoryId: e.target.value || null }))}
-                      style={{ ...styles.input, flex: 1 }}
-                    >
-                      <option value="">全部商品</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      value={bonusDraft.triggerAmount}
-                      onChange={(e) => setBonusDraft((prev) => ({ ...prev, triggerAmount: e.target.value }))}
-                      style={{ ...styles.input, flex: 1 }}
-                      placeholder="門檻金額"
-                    />
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                    <select
-                      value={bonusDraft.triggerProductIds?.[0] ?? ''}
-                      onChange={(e) => setBonusDraft((prev) => ({ ...prev, triggerProductIds: e.target.value ? [e.target.value] : [] }))}
-                      style={{ ...styles.input, flex: 1 }}
-                    >
-                      <option value="">選擇觸發商品</option>
-                      {activeProductsForRules.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700, marginTop: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!bonusDraft.enabled}
+                    onChange={(e) => setBonusDraft((prev) => ({ ...prev, enabled: e.target.checked }))}
+                  />
+                  {t('admin.enabled')}
+                </label>
+
+                {bonusDraft.kind === 'amount' ? (
+                  <>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 160px' }}>
+                        <div style={styles.label}>{t('admin.amountCategory')}</div>
+                        <select
+                          value={bonusDraft.categoryId ?? ''}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, categoryId: e.target.value || null }))}
+                          style={styles.input}
+                        >
+                          <option value="">{t('admin.amountAll')}</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ flex: '1 1 140px' }}>
+                        <div style={styles.label}>{t('admin.amountThreshold')}</div>
+                        <input
+                          type="number"
+                          min={1}
+                          value={bonusDraft.triggerAmount}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, triggerAmount: e.target.value }))}
+                          style={styles.input}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.exclusiveGroup')}</div>
+                      <input
+                        value={bonusDraft.exclusiveGroup}
+                        onChange={(e) => setBonusDraft((prev) => ({ ...prev, exclusiveGroup: e.target.value }))}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.bonusText')}</div>
+                      <input
+                        value={bonusDraft.bonusText}
+                        onChange={(e) => setBonusDraft((prev) => ({ ...prev, bonusText: e.target.value }))}
+                        style={styles.input}
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {bonusDraft.kind === 'combo' ? (
+                  <>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.comboContents')}</div>
+                      <SlotEditor
+                        slots={bonusDraft.slots}
+                        onChange={(slots) => setBonusDraft((prev) => ({ ...prev, slots }))}
+                        products={activeProductsForRules}
+                        categories={categories}
+                        qtyKey="qty"
+                      />
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.rewardType')}</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 4px 4px 0' }}>
+                        {[['price', t('admin.rewardPrice')], ['gift', t('admin.rewardGift')]].map(([v, label]) => (
+                          <button key={v} type="button" style={styles.chip(bonusDraft.rewardType === v)} onClick={() => setBonusDraft((prev) => ({ ...prev, rewardType: v }))}>
+                            {label}
+                          </button>
                         ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      value={bonusDraft.triggerProductQty}
-                      onChange={(e) => setBonusDraft((prev) => ({ ...prev, triggerProductQty: e.target.value }))}
-                      style={{ ...styles.input, flex: 1 }}
-                      placeholder="最少數量"
-                    />
-                  </div>
-                )}
+                      </div>
+                    </div>
+                    {bonusDraft.rewardType === 'price' ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={styles.label}>{t('admin.comboPrice')}</div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={bonusDraft.comboPrice}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, comboPrice: e.target.value }))}
+                          style={styles.input}
+                        />
+                        {comboNotCheaper ? (
+                          <div style={{ marginTop: 8, padding: '8px 10px', border: border.solidSm, borderRadius: 10, background: ui.apricot, fontWeight: 700, fontSize: 12 }}>
+                            {t('admin.comboNotCheaper')}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={styles.label}>{t('admin.bonusText')}</div>
+                        <input
+                          value={bonusDraft.bonusText}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, bonusText: e.target.value }))}
+                          style={styles.input}
+                        />
+                      </div>
+                    )}
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.exclusiveGroup')}</div>
+                      <input
+                        value={bonusDraft.exclusiveGroup}
+                        onChange={(e) => setBonusDraft((prev) => ({ ...prev, exclusiveGroup: e.target.value }))}
+                        style={styles.input}
+                      />
+                    </div>
+                  </>
+                ) : null}
 
-                <input
-                  value={bonusDraft.bonusText}
-                  onChange={(e) => setBonusDraft((prev) => ({ ...prev, bonusText: e.target.value }))}
-                  style={{ ...styles.input, marginTop: 10 }}
-                  placeholder="贈品顯示文案"
-                />
+                {bonusDraft.kind === 'bundle' ? (
+                  <>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 140px' }}>
+                        <div style={styles.label}>{t('admin.bundlePrice')}</div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={bonusDraft.bundle.price}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, bundle: { ...prev.bundle, price: e.target.value } }))}
+                          style={styles.input}
+                        />
+                      </div>
+                      <div style={{ flex: '1 1 140px' }}>
+                        <div style={styles.label}>{t('admin.bundleStock')}</div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={bonusDraft.bundle.stock === null ? '' : bonusDraft.bundle.stock}
+                          onChange={(e) => setBonusDraft((prev) => ({ ...prev, bundle: { ...prev.bundle, stock: e.target.value === '' ? null : parseInt(e.target.value, 10) } }))}
+                          style={styles.input}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.bundleCategory')}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 4px 4px 0' }}>
+                        {categories.map((c) => {
+                          const on = (bonusDraft.bundle.categoryIds ?? []).includes(c.id);
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              style={styles.chip(on)}
+                              onClick={() => setBonusDraft((prev) => {
+                                const cur = prev.bundle.categoryIds ?? [];
+                                const next = on ? cur.filter((id) => id !== c.id) : [...cur, c.id];
+                                return { ...prev, bundle: { ...prev.bundle, categoryIds: next } };
+                              })}
+                            >
+                              {c.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.bundleColor')}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: '2px 4px 4px 2px' }}>
+                        {COLOR_PRESETS.map((c) => (
+                          <div key={c} style={styles.swatch(bonusDraft.bundle.color === c, c)} onClick={() => setBonusDraft((prev) => ({ ...prev, bundle: { ...prev.bundle, color: c } }))} />
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <div style={styles.label}>{t('admin.bundleContents')}</div>
+                      <SlotEditor
+                        slots={bonusDraft.bundle.bundleSlots}
+                        onChange={(bundleSlots) => setBonusDraft((prev) => ({ ...prev, bundle: { ...prev.bundle, bundleSlots } }))}
+                        products={activeProductsForRules}
+                        categories={categories}
+                        qtyKey="pickQty"
+                      />
+                    </div>
+                  </>
+                ) : null}
 
-                <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                  <button type="button" onClick={() => setBonusDraft(null)} style={{ ...styles.input, width: 'auto', padding: '10px 14px' }}>
-                    取消
+                <div style={{ display: 'flex', gap: 12, marginTop: 16, padding: '0 6px 6px 0' }}>
+                  <button type="button" onClick={() => setBonusDraft(null)} style={{ ...styles.btnSecondary, flex: 1 }}>
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="button"
-                    onClick={() => saveBonusRule().catch((e) => console.error(e))}
-                    style={{
-                      borderRadius: 28,
-                      padding: '10px 14px',
-                      fontWeight: 800,
-                      border: 'none',
-                      background: ui.primary,
-                      color: '#FFFFFF',
-                      cursor: 'pointer',
-                      boxShadow: '0 10px 22px rgba(128, 161, 212, 0.38)',
-                    }}
+                    onClick={() => saveBonusRule().catch((e) => { console.error(e); toast.show(t('admin.err.saveFailed'), 'error'); })}
+                    style={{ ...styles.btnPrimary, flex: 1 }}
                   >
-                    儲存活動
+                    {t('admin.saveActivity')}
                   </button>
                 </div>
               </div>
@@ -1333,24 +1698,16 @@ export default function AdminProducts({ products = [], refreshProducts }) {
           <div style={{ ...styles.formCard, marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 16, borderLeft: '3px solid #80A1D4', paddingLeft: 10 }}>付款方式維護</div>
-                <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12, marginTop: 6 }}>
+                <div style={styles.h2}>付款方式維護</div>
+            <div style={styles.h2Bar} />
+                <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12, marginTop: 6 }}>
                   預購與販售頁共用此設定。
                 </div>
               </div>
               <button
                 type="button"
                 onClick={startNewPaymentMethod}
-                style={{
-                  borderRadius: 28,
-                  padding: '12px 14px',
-                  fontWeight: 800,
-                  border: 'none',
-                  background: ui.primary,
-                  color: '#FFFFFF',
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 22px rgba(128, 161, 212, 0.38)',
-                }}
+                style={styles.btnPrimary}
               >
                 ＋ 新增付款方式
               </button>
@@ -1358,19 +1715,19 @@ export default function AdminProducts({ products = [], refreshProducts }) {
 
             <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
               {paymentMethods.map((pm) => (
-                <div key={pm.id} style={{ border: '1px solid rgba(255,255,255,0.52)', borderRadius: 18, padding: 12, backgroundColor: 'rgba(255,255,255,0.48)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', boxShadow: '0 4px 14px rgba(180,140,220,0.10)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div key={pm.id} style={styles.rowCard}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <div>
-                      <div style={{ fontWeight: 900 }}>{pm.name}</div>
-                      <div style={{ color: '#9A8898', fontWeight: 800, fontSize: 12 }}>
+                      <div style={{ fontWeight: 800 }}>{pm.name}</div>
+                      <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12 }}>
                         {pm.enabled ? '啟用中' : '停用'} · {pm.isCash ? '收現' : '非收現'}
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button type="button" style={{ ...styles.input, width: 'auto', padding: '8px 10px' }} onClick={() => startEditPaymentMethod(pm)}>
+                      <button type="button" style={styles.btnSmall} onClick={() => startEditPaymentMethod(pm)}>
                         編輯
                       </button>
-                      <button type="button" style={{ ...styles.input, width: 'auto', padding: '8px 10px', color: ui.primary }} onClick={() => deletePaymentMethod(pm.id).catch((e) => console.error(e))}>
+                      <button type="button" style={styles.btnSmallDanger} onClick={() => deletePaymentMethod(pm.id).catch((e) => console.error(e))}>
                         刪除
                       </button>
                     </div>
@@ -1381,7 +1738,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
 
             {paymentDraft ? (
               <div style={{ marginTop: 20, paddingTop: 16 }}>
-                <div style={{ fontWeight: 900, marginBottom: 8 }}>編輯付款方式</div>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>編輯付款方式</div>
                 <input
                   value={paymentDraft.name}
                   onChange={(e) => setPaymentDraft((prev) => ({ ...prev, name: e.target.value }))}
@@ -1407,22 +1764,13 @@ export default function AdminProducts({ products = [], refreshProducts }) {
                   </label>
                 </div>
                 <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                  <button type="button" onClick={() => setPaymentDraft(null)} style={{ ...styles.input, width: 'auto', padding: '10px 14px' }}>
+                  <button type="button" onClick={() => setPaymentDraft(null)} style={styles.btnSecondary}>
                     取消
                   </button>
                   <button
                     type="button"
                     onClick={() => savePaymentMethod().catch((e) => console.error(e))}
-                    style={{
-                      borderRadius: 28,
-                      padding: '10px 14px',
-                      fontWeight: 800,
-                      border: 'none',
-                      background: ui.primary,
-                      color: '#FFFFFF',
-                      cursor: 'pointer',
-                      boxShadow: '0 10px 22px rgba(128, 161, 212, 0.38)',
-                    }}
+                    style={styles.btnPrimary}
                   >
                     儲存付款方式
                   </button>
@@ -1433,15 +1781,31 @@ export default function AdminProducts({ products = [], refreshProducts }) {
 
         {/* 備份/還原 */}
         <div style={{ ...styles.formCard, marginTop: 12 }}>
-          <div style={{ fontWeight: 900, fontSize: 16, borderLeft: '3px solid #80A1D4', paddingLeft: 10, marginBottom: 12 }}>
-            雲端備份
-          </div>
+          <div style={styles.h2}>雲端備份</div>
+            <div style={styles.h2Bar} />
           <BackupRestore />
+        </div>
+
+        <div style={{ ...styles.formCard, marginTop: 12 }}>
+          <div style={styles.h2}>危險操作</div>
+            <div style={styles.h2Bar} />
+          <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
+            此操作將會清空「這個裝置上」所有的暫存資料，按下就會全部消失喔！
+            <br />
+            操作前請務必確認資料都有備份好喔！
+          </div>
+          <button
+            type="button"
+            onClick={() => clearAllDataAndToast().catch((e) => console.error(e))}
+            style={styles.btnDangerFilled}
+          >
+            ⚠ {getString('R5')}
+          </button>
         </div>
         </div>
       ) : null}
 
-      <Toast message={toast.message} visible={toast.visible} />
+      <Toast message={toast.message} visible={toast.visible} variant={toast.variant} />
     </div>
   );
 }
@@ -1469,38 +1833,20 @@ function AddCategoryBox({ categories, onCreated, onDeleted }) {
             await onCreated(v);
             setName('');
           }}
-          style={{
-            borderRadius: 28,
-            padding: '12px 14px',
-            border: 'none',
-            background: ui.primary,
-            color: '#FFFFFF',
-            fontWeight: 800,
-            cursor: 'pointer',
-            boxShadow: styles.shadow,
-          }}
+          style={{ ...styles.btnPrimary, minWidth: 44, padding: '10px 16px', fontSize: 18 }}
         >
           ＋
         </button>
       </div>
 
       {categories.length > 0 ? (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 4px 4px 0' }}>
           {categories.map((c) => (
             <button
               key={c.id}
               type="button"
               onClick={() => onDeleted?.(c.id)}
-              style={{
-                borderRadius: 20,
-                padding: '6px 10px',
-                border: 'none',
-                backgroundColor: '#FFFFFF',
-                boxShadow: styles.shadow,
-                color: '#9A8898',
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
+              style={{ ...styles.chip(false), border: border.dashed, minHeight: 36 }}
               title={`刪除類別：${c.name}`}
             >
               {c.name} ×

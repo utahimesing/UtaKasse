@@ -38,8 +38,7 @@ export function getTaipeiNextMidnightMs(now = new Date()) {
     minute: '2-digit',
     second: '2-digit',
   }).format(now);
-  const [ymd, hms] = nowStr.split(', ');
-  const [year, month, day] = ymd.split('-').map(Number);
+  const [, hms] = nowStr.split(', ');
   const [hour, minute, second] = hms.split(':').map(Number);
   const passedMs = ((hour * 60 + minute) * 60 + second) * 1000;
   const dayMs = 24 * 60 * 60 * 1000;

@@ -1,3 +1,4 @@
+/* global google */
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const SCOPES = 'https://www.googleapis.com/auth/drive.file'
 const FOLDER_NAME = 'UTA Kasse 備份'
