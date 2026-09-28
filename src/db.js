@@ -1,4 +1,10 @@
 import Dexie from 'dexie';
+import {
+  CURRENT_BACKUP_VERSION,
+  SUPPORTED_BACKUP_VERSIONS,
+  migrateBackupPayload,
+  migrateBonusRuleV3toV4,
+} from './lib/migrations.js';
 
 /**
  * Dexie database (IndexedDB)
@@ -26,7 +32,7 @@ db.version(2).stores({
   transactions: 'id, eventId, date, type, createdAt, preorderId',
 });
 
-// Version 3: add events.name index (needed for report export filename)
+// Version 3 (App v1.0.0): add events.name index (report export filename)
 db.version(3).stores({
   events: 'id, name, status, date, createdAt',
   categories: 'id, sortOrder',
@@ -36,6 +42,37 @@ db.version(3).stores({
   preOrders: 'id, eventId, status, phoneLast5, bankLast5',
   transactions: 'id, eventId, date, type, createdAt, preorderId',
 });
+
+// Version 4: add products.sortOrder index
+db.version(4).stores({
+  events: 'id, name, status, date, createdAt',
+  categories: 'id, sortOrder',
+  products: 'id, archived, *categoryIds, isNew, stock, sortOrder',
+  bonusRules: 'id, enabled, triggerType, exclusiveGroup, sortOrder',
+  paymentMethods: 'id, enabled, isDefault, sortOrder',
+  preOrders: 'id, eventId, status, phoneLast5, bankLast5',
+  transactions: 'id, eventId, date, type, createdAt, preorderId',
+});
+
+// Version 5 (App v1.1.0): 活動系統改版。
+// 索引不變（products.type / bundleSlots、bonusRules.slots 不建索引，讀取時用 type ?? 'single'）。
+// upgrade：舊的合購特典 'product' → 'combo' + rewardType 'gift'（行為完全不變：只提醒）。
+db.version(5)
+  .stores({
+    events: 'id, name, status, date, createdAt',
+    categories: 'id, sortOrder',
+    products: 'id, archived, *categoryIds, isNew, stock, sortOrder',
+    bonusRules: 'id, enabled, triggerType, exclusiveGroup, sortOrder',
+    paymentMethods: 'id, enabled, isDefault, sortOrder',
+    preOrders: 'id, eventId, status, phoneLast5, bankLast5',
+    transactions: 'id, eventId, date, type, createdAt, preorderId',
+  })
+  .upgrade(async (tx) => {
+    await tx.table('bonusRules').toCollection().modify((rule) => {
+      const migrated = migrateBonusRuleV3toV4(rule);
+      Object.assign(rule, migrated);
+    });
+  });
 
 export function createUUID() {
   // Browser-native UUID; falls back to random string for older runtimes.
@@ -90,6 +127,17 @@ function validateTableRows(rows, tableName) {
   });
 }
 
+/** 驗證「欄位」陣列（套組 bundleSlots 用 pickQty；合購 slots 用 qty） */
+function validateSlots(slots, label, qtyKey) {
+  ensureArray(slots, label);
+  slots.forEach((slot, idx) => {
+    if (!isPlainObject(slot)) throw new Error(`備份格式錯誤：${label}[${idx}] 必須是物件`);
+    ensureNumber(slot[qtyKey], `${label}[${idx}].${qtyKey}`);
+    if (slot[qtyKey] < 1) throw new Error(`備份格式錯誤：${label}[${idx}].${qtyKey} 必須 ≥ 1`);
+    ensureArray(slot.poolProductIds, `${label}[${idx}].poolProductIds`);
+  });
+}
+
 export function validateBackupPayload(data) {
   if (!isPlainObject(data)) throw new Error('備份格式錯誤：根節點必須是物件');
 
@@ -112,8 +160,8 @@ export function validateBackupPayload(data) {
   });
 
   ensureNumber(data.version, 'version');
-  if (data.version !== 3) {
-    throw new Error(`備份版本不支援：${data.version}，目前僅支援版本 3`);
+  if (!SUPPORTED_BACKUP_VERSIONS.includes(data.version)) {
+    throw new Error(`備份版本不支援：${data.version}，目前支援版本 ${SUPPORTED_BACKUP_VERSIONS.join('／')}`);
   }
   ensureString(data.exportedAt, 'exportedAt', { max: 64 });
   if (Number.isNaN(Date.parse(data.exportedAt))) {
@@ -152,6 +200,27 @@ export function validateBackupPayload(data) {
     if (typeof product.categoryIds !== 'undefined') {
       ensureArray(product.categoryIds, `products[${idx}].categoryIds`);
     }
+    // v5：type 只能是 single／bundle；bundle 必須有 bundleSlots
+    if (typeof product.type !== 'undefined' && product.type !== 'single' && product.type !== 'bundle') {
+      throw new Error(`備份格式錯誤：products[${idx}].type 只能是 single 或 bundle`);
+    }
+    if (product.type === 'bundle') {
+      validateSlots(product.bundleSlots, `products[${idx}].bundleSlots`, 'pickQty');
+    }
+  });
+
+  (data.bonusRules ?? []).forEach((rule, idx) => {
+    // 舊備份（v3／v4）允許 'product'，還原時會由 migrateBackupPayload 轉成 combo
+    if (rule.triggerType === 'combo') {
+      validateSlots(rule.slots, `bonusRules[${idx}].slots`, 'qty');
+      if (rule.rewardType === 'price') {
+        ensureNumber(rule.comboPrice, `bonusRules[${idx}].comboPrice`);
+        if (rule.comboPrice < 0) throw new Error(`備份格式錯誤：bonusRules[${idx}].comboPrice 必須 ≥ 0`);
+      }
+    }
+    if (rule.triggerType === 'bundle') {
+      ensureString(rule.productId, `bonusRules[${idx}].productId`, { max: 120 });
+    }
   });
 
   (data.paymentMethods ?? []).forEach((pm, idx) => {
@@ -184,7 +253,7 @@ export async function exportAllData() {
   ])
 
   return {
-    version: 3,
+    version: CURRENT_BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     events,
     categories,
@@ -196,9 +265,10 @@ export async function exportAllData() {
   }
 }
 
-// ===== 還原：把資料寫回所有資料表 =====
-export async function importAllData(data) {
-  validateBackupPayload(data);
+// ===== 還原：把資料寫回所有資料表（v3／v4 備份會先轉成 v5） =====
+export async function importAllData(rawData) {
+  validateBackupPayload(rawData);
+  const data = migrateBackupPayload(rawData);
 
   await db.transaction(
     'rw',

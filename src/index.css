@@ -1,67 +1,92 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800&display=swap');
 
+/* ══════════════════════════════════════════════════════
+   UtaKasse 設計代幣 v4 — Neo-Brutalism
+   高飽和色塊 ＋ 粗黑框 ＋ 硬陰影（不模糊）
+   JS 端對應：src/lib/uiPalette.js
+   ══════════════════════════════════════════════════════ */
 :root {
-  --bg:              #F7F4EA;
-  --surface:         #DED9E2;
-  --accent:          #C0B9DD;
-  --primary:         #80A1D4;
-  --primary-light:   #9BBCE8;
-  --success:         #75C9C8;
-  --success-light:   #8FD8D7;
-  --danger:          #5B4D8A;   /* Deep Periwinkle */
-  --danger-light:    rgba(220,215,240,0.60);
-  --danger-text:     #FFFFFF;
+  /* ── 品牌色（5 色） ── */
+  --orange:   #FF9F1C;   /* Pop Orange：主操作、結帳 CTA、Nav active */
+  --apricot:  #FFBF69;   /* Apricot：選中、hover、標籤、特典提示 */
+  --white:    #FFFFFF;   /* 卡片／面板／輸入框底色 */
+  --mint:     #CBF3F0;   /* Pale Mint：頁面底色 */
+  --teal:     #2EC4B6;   /* Teal：成功／確認 */
 
-  --ink:             #3D3060;
-  --muted:           #8B85A0;
+  /* ── 結構色 ── */
+  --ink:       #1A1A1A;              /* 主文字、所有邊框、硬陰影 */
+  --muted:     #4F5B5A;              /* 次要文字、placeholder */
+  --line-soft: rgba(26,26,26,0.12);  /* 唯一允許的半透明色：格線、表格分隔 */
+  --rose:      #D96868;              /* 只給 Toast 錯誤訊息用 */
 
-  /* 保留 rose 只給 Toast 錯誤訊息用 */
-  --rose:            #D96868;
-  --rose-light:      #F2A3A3;
-  --rose-dark:       #B04D4D;
-  --mint:            #75C9C8;
-  --mint-border:     #75C9C8;
-  --lavender:        #C0B9DD;
-  --lav-dark:        #80A1D4;
+  /* ── 語意別名（沿用舊變數名，讓既有引用不必改） ── */
+  --bg:          var(--mint);
+  --surface:     var(--white);
+  --accent:      var(--apricot);
+  --primary:     var(--orange);
+  --success:     var(--teal);
+  --danger:      var(--ink);
+  --danger-text: var(--white);
 
-  --glass-bg:        rgba(255,255,255,0.52);
-  --glass-border:    rgba(255,255,255,0.72);
-  --blur-lg:         blur(24px);
-  --blur-md:         blur(16px);
-  --shadow-card:     0 8px 32px rgba(128,161,212,0.18), 0 2px 8px rgba(192,185,221,0.12);
-  --shadow-primary:  0 8px 22px rgba(128,161,212,0.42);
-  --shadow-success:  0 6px 20px rgba(117,201,200,0.42);
+  /* ── 邊框 ── */
+  --border-w:    2.5px;
+  --border-w-sm: 2px;
+  --border:      2.5px solid #1A1A1A;
+  --border-sm:   2px solid #1A1A1A;
 
-  --border:          rgba(255,255,255,0.72);
-  --success:         #4A8840;
+  /* ── 硬陰影（blur 一律為 0） ── */
+  --shadow-sm: 3px 3px 0 #1A1A1A;
+  --shadow-md: 5px 5px 0 #1A1A1A;
+  --shadow-lg: 8px 8px 0 #1A1A1A;
 
-  --card-shadow-elevated: var(--shadow-card);
-
-  --radius-sm:  8px;
-  --radius-md:  14px;
-  --radius-lg:  20px;
-  --radius-xl:  28px;
-  --radius-pill:999px;
+  /* ── 圓角 ── */
+  --radius-sm:   4px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-xl:   18px;
+  --radius-pill: 999px;
 }
 
 html, body {
   margin: 0;
   padding: 0;
-  background: transparent;
+  background: var(--mint);
   color: var(--ink);
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'DM Sans', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   overflow-x: hidden;
   max-width: 100%;
 }
 
-button {
+button,
+input,
+select,
+textarea {
   font-family: inherit;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
+button {
+  transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+}
+
+/* 按下回饋：往右下位移 3px、硬陰影消失 ＝ 按鈕被「壓下去」
+   用 !important 是因為元件多以 inline style 指定 boxShadow，否則會蓋不掉 */
 button:active:not(:disabled),
 .pressable:active {
-  transform: scale(0.96);
+  transform: translate(3px, 3px) !important;
+  box-shadow: 0 0 0 #1A1A1A !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: 3px 3px 0 #FF9F1C;
 }
 
 .topRef {
@@ -76,40 +101,18 @@ button:active:not(:disabled),
   overflow-x: hidden;
 }
 
-/* ── Wisteria Aurora 背景（5 層，新色系） ── */
+/* ── 全頁方格紙背景（格線要淡，不可搶內容） ── */
 body::before {
   content: '';
   position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse 65% 55% at 8%   5%,  rgba(192,185,221,0.55) 0%, transparent 62%),
-    radial-gradient(ellipse 50% 45% at 92%  12%, rgba(117,201,200,0.40) 0%, transparent 58%),
-    radial-gradient(ellipse 55% 48% at 50%  90%, rgba(128,161,212,0.28) 0%, transparent 64%),
-    radial-gradient(ellipse 70% 60% at 78%  72%, rgba(192,185,221,0.30) 0%, transparent 68%),
-    radial-gradient(ellipse 40% 35% at 20%  70%, rgba(117,201,200,0.20) 0%, transparent 55%),
-    linear-gradient(158deg, #EEE9F8 0%, #E4F2F2 48%, #EEF0FA 100%);
+  background-color: #CBF3F0;
+  background-image:
+    linear-gradient(rgba(26,26,26,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,26,26,0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-/* 底部導覽樣式由 App.jsx（浮島 nav）內聯控制；勿在此對 nav 使用 !important，否則會蓋掉元件樣式 */
-
-/* ── 底部抽屜面板 ── */
-div[style*="border-radius: 28px 28px 0 0"] {
-  background: rgba(255,255,255,0.72) !important;
-  -webkit-backdrop-filter: var(--blur-lg) !important;
-  backdrop-filter: var(--blur-lg) !important;
-  border: none !important;
-  border-top: 1px solid rgba(255,255,255,0.78) !important;
-  box-shadow: 0 -8px 40px rgba(128,161,212,0.20) !important;
-}
-
-/* ── 通用磨砂面板 ── */
-.glass-sheet {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--blur-md);
-  backdrop-filter: var(--blur-md);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-card);
-}
+/* 底部導覽樣式由 App.jsx（浮島 nav）內聯控制；底部抽屜樣式由各元件用 surface.sheet 代幣自行指定 */

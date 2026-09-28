@@ -1,24 +1,24 @@
-import React from 'react';
 import { t } from '../i18n/t.js';
 import Badge from './Badge.jsx';
 import {
   PRODUCT_PLACEHOLDER_BACKGROUNDS,
-  cardShadowElevated,
   productPlaceholderVariantIndex,
+  border,
+  shadow,
   ui,
 } from '../lib/uiPalette.js';
 
 const S = {
   card: {
-    borderRadius: 20, color: ui.ink,
-    background: 'rgba(255,255,255,0.55)',
-    backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
-    boxShadow: cardShadowElevated,
-    border: '1px solid rgba(255,255,255,0.72)',
-    position: 'relative', overflow: 'hidden', padding: 16,
+    borderRadius: 14, color: ui.ink,
+    background: ui.white,
+    border: border.solid,
+    boxShadow: shadow.md,
+    position: 'relative', overflow: 'hidden', padding: 12,
   },
   media: {
-    borderRadius: 14, width: '100%', aspectRatio: '1/1',
+    borderRadius: 8, width: '100%', aspectRatio: '1/1',
+    border: border.solidSm,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     position: 'relative', overflow: 'hidden', marginBottom: 10,
   },
@@ -28,7 +28,7 @@ const S = {
     pointerEvents: 'none',
   },
   name: {
-    textAlign: 'center', fontWeight: 900, fontSize: 13,
+    textAlign: 'center', fontWeight: 800, fontSize: 14,
     color: ui.ink, lineHeight: 1.3, minHeight: 20,
   },
   bottom: {
@@ -43,23 +43,35 @@ export default function ProductCard({ product, cartQty, onClick, nameStyle }) {
   const isSoldOut = stock === 0;
   const isLowStock = typeof stock === 'number' && stock > 0 && stock <= 5;
   const hasImage = !!product?.imageUrl;
+  const inCart = typeof cartQty === 'number' && cartQty > 0;
   const placeholderBg = PRODUCT_PLACEHOLDER_BACKGROUNDS[productPlaceholderVariantIndex(product?.id)];
 
   return (
     <div
       className="pressable" role="button" tabIndex={0} onClick={onClick}
-      style={{ ...S.card, cursor: isSoldOut ? 'not-allowed' : 'pointer', opacity: isSoldOut ? 0.55 : 1, pointerEvents: isSoldOut ? 'none' : 'auto' }}
+      style={{
+        ...S.card,
+        // 已加入購物車：底色改杏色
+        background: inCart ? ui.apricot : ui.white,
+        cursor: isSoldOut ? 'not-allowed' : 'pointer',
+        opacity: isSoldOut ? 0.55 : 1,
+        pointerEvents: isSoldOut ? 'none' : 'auto',
+      }}
     >
-      <div style={{ ...S.media, background: hasImage ? 'transparent' : placeholderBg }}>
+      <div style={{ ...S.media, background: hasImage ? ui.white : placeholderBg }}>
         {hasImage
           ? <img src={product.imageUrl} alt={product?.name ?? 'product'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-          : <span style={{ fontWeight: 700, color: ui.muted, fontSize: 11 }}>{t('product.newBadge')}</span>
+          : <span style={{ fontWeight: 700, color: ui.muted, fontSize: 11 }}>{t('product.placeholder')}</span>
         }
       </div>
 
       <div style={S.topRow}>
-        {product?.isNew ? <Badge variant="new">{t('product.newBadge')}</Badge> : <span />}
-        {typeof cartQty === 'number' && cartQty > 0
+        {product?.isNew
+          ? <Badge variant="new">{t('product.newBadge')}</Badge>
+          : (product?.type ?? 'single') === 'bundle'
+            ? <Badge variant="category-active">{t('sales.bundleBadge')}</Badge>
+            : <span />}
+        {inCart
           ? <Badge variant="bonus">{cartQty}</Badge>
           : <span />}
       </div>
@@ -68,10 +80,10 @@ export default function ProductCard({ product, cartQty, onClick, nameStyle }) {
 
       <div style={S.bottom}>
         <div style={{ flexShrink: 0 }}>
-          {!isUnlimited && !isSoldOut && <Badge variant={isLowStock ? 'low' : 'stock'}>庫存 {stock}</Badge>}
-          {isSoldOut && <Badge variant="sold">售完</Badge>}
+          {!isUnlimited && !isSoldOut && <Badge variant={isLowStock ? 'low' : 'stock'}>{t('product.stock')} {stock}</Badge>}
+          {isSoldOut && <Badge variant="sold">{t('product.soldOut')}</Badge>}
         </div>
-        <div style={{ color: ui.ink, fontWeight: 900, fontSize: 16, flexShrink: 0 }}>NT${product?.price ?? 0}</div>
+        <div style={{ color: ui.ink, fontWeight: 800, fontSize: 17, flexShrink: 0 }}>NT${product?.price ?? 0}</div>
       </div>
     </div>
   );

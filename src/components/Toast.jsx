@@ -1,38 +1,37 @@
-import React, { useEffect, useState } from 'react';
-import { ui } from '../lib/uiPalette.js';
+import { ui, border, shadow } from '../lib/uiPalette.js';
+
+/**
+ * Toast（Neo-Brutalism）
+ * variant: 'info'（白底黑字，預設）| 'success'（青綠底黑字）| 'error'（--rose 底白字，唯一合法使用處）
+ * 顯示時間由 useToast 控制（visible 會在 duration 後自動變 false），這裡只負責畫。
+ */
+const variants = {
+  info:    { background: ui.white, color: ui.ink },
+  success: { background: ui.teal,  color: ui.ink },
+  error:   { background: ui.rose,  color: ui.white },
+};
 
 const base = {
   position: 'fixed',
   left: '50%',
   bottom: 24,
   transform: 'translateX(-50%)',
-  backgroundColor: ui.ink,
-  color: '#FFFFFF',
   padding: '12px 16px',
-  borderRadius: 24,
-  fontWeight: 800,
-  fontSize: 12,
-  boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+  border: border.solid,
+  borderRadius: 10,
+  boxShadow: shadow.sm,
+  fontWeight: 700,
+  fontSize: 13,
   zIndex: 9999,
   maxWidth: 320,
   textAlign: 'center',
 };
 
-export default function Toast({ message, visible, durationMs = 2000 }) {
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    if (!visible) return;
-    setShow(true);
-    const t = setTimeout(() => setShow(false), durationMs);
-    return () => clearTimeout(t);
-  }, [visible, durationMs]);
-
-  if (!message || !show) return null;
+export default function Toast({ message, visible, variant = 'info' }) {
+  if (!message || !visible) return null;
   return (
-    <div style={base}>
+    <div style={{ ...base, ...(variants[variant] ?? variants.info) }} role="status">
       {message}
     </div>
   );
 }
-

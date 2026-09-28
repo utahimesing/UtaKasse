@@ -3,9 +3,16 @@ import { getTaipeiDateKey } from './dateTaipei.js';
 import { PRODUCT_COLOR_PRESETS } from './uiPalette.js';
 
 export async function ensureSeedData() {
-  const catCount = await db.categories.count();
-  if (catCount > 0) return;
+  // 包在同一個 rw transaction：React StrictMode（開發模式）會讓 effect 跑兩次，
+  // 兩次同時進來時第二次會排在第一次之後，看到 count > 0 就直接結束，不會再 bulkAdd 撞 key。
+  await db.transaction('rw', [db.categories, db.paymentMethods, db.products, db.bonusRules, db.events], async () => {
+    const catCount = await db.categories.count();
+    if (catCount > 0) return;
+    await seedDefaults();
+  });
+}
 
+async function seedDefaults() {
   const todayKey = getTaipeiDateKey(new Date());
 
   const defaultCategories = [
@@ -22,30 +29,30 @@ export async function ensureSeedData() {
   await db.paymentMethods.bulkAdd(defaultPaymentMethods);
 
   const defaultProducts = [
-    { id: 'p-01', name: '測試商品A', price: 100, stock: 10, color: PRODUCT_COLOR_PRESETS[0], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false },
-    { id: 'p-02', name: '測試商品B', price: 200, stock: 10, color: PRODUCT_COLOR_PRESETS[1], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false },
-    { id: 'p-03', name: '測試商品C', price: 300, stock: 5,  color: PRODUCT_COLOR_PRESETS[2], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false },
-    { id: 'p-04', name: '測試商品D', price: 500, stock: null, color: PRODUCT_COLOR_PRESETS[0], categoryIds: ['cat-02'], imageUrl: null, isNew: true, archived: false },
-    { id: 'p-05', name: '測試商品E', price: 100, stock: 20, color: PRODUCT_COLOR_PRESETS[1], categoryIds: ['cat-02'], imageUrl: null, isNew: true, archived: false },
-    { id: 'p-06', name: '測試商品F', price: 150, stock: 20, color: PRODUCT_COLOR_PRESETS[2], categoryIds: ['cat-02'], imageUrl: null, isNew: false, archived: false },
+    { id: 'p-01', name: '測試商品A', price: 100, stock: 10, color: PRODUCT_COLOR_PRESETS[0], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false, type: 'single' },
+    { id: 'p-02', name: '測試商品B', price: 200, stock: 10, color: PRODUCT_COLOR_PRESETS[1], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false, type: 'single' },
+    { id: 'p-03', name: '測試商品C', price: 300, stock: 5,  color: PRODUCT_COLOR_PRESETS[2], categoryIds: ['cat-01'], imageUrl: null, isNew: false, archived: false, type: 'single' },
+    { id: 'p-04', name: '測試商品D', price: 500, stock: null, color: PRODUCT_COLOR_PRESETS[0], categoryIds: ['cat-02'], imageUrl: null, isNew: true, archived: false, type: 'single' },
+    { id: 'p-05', name: '測試商品E', price: 100, stock: 20, color: PRODUCT_COLOR_PRESETS[1], categoryIds: ['cat-02'], imageUrl: null, isNew: true, archived: false, type: 'single' },
+    { id: 'p-06', name: '測試商品F', price: 150, stock: 20, color: PRODUCT_COLOR_PRESETS[2], categoryIds: ['cat-02'], imageUrl: null, isNew: false, archived: false, type: 'single' },
   ];
   await db.products.bulkAdd(defaultProducts);
 
   const bonusRules = [
     {
       id: 'br1',
-      name: '範例特典（商品觸發）',
+      name: '範例活動（合購提醒）',
       enabled: true,
-      triggerType: 'product',
+      triggerType: 'combo',
+      rewardType: 'gift',
       exclusiveGroup: null,
       sortOrder: 1,
-      triggerProductIds: ['p-04'],
-      triggerProductQty: 1,
+      slots: [{ id: 'slot-br1-1', label: '指定商品', qty: 1, poolProductIds: ['p-04'] }],
       bonusText: '含「測試商品D」➜ 送【範例贈品】',
     },
     {
       id: 'br2',
-      name: '範例特典（滿額小）',
+      name: '範例活動（滿額小）',
       enabled: true,
       triggerType: 'amount',
       exclusiveGroup: '範例好禮',
@@ -56,7 +63,7 @@ export async function ensureSeedData() {
     },
     {
       id: 'br3',
-      name: '範例特典（滿額大）',
+      name: '範例活動（滿額大）',
       enabled: true,
       triggerType: 'amount',
       exclusiveGroup: '範例好禮',
@@ -72,7 +79,7 @@ export async function ensureSeedData() {
   if (hasEvent === 0) {
     await db.events.add({
       id: 'evt-01',
-      name: '範例活動',
+      name: '範例場次',
       date: todayKey,
       status: 'active',
       createdAt: Date.now(),

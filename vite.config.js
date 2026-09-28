@@ -15,8 +15,8 @@ export default defineConfig({
         name: '姬帳 UtaKasse',
         short_name: 'UtaKasse',
         description: '同人場記帳 App',
-        theme_color: '#D96868',
-        background_color: '#FBF6F6',
+        theme_color: '#FF9F1C',
+        background_color: '#CBF3F0',
         display: 'standalone',
         start_url: '/',
         scope: '/',
@@ -37,6 +37,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+        // xlsx（SheetJS）chunk 約 500KB，要進 precache 才能離線匯出；預設上限 2MB，這裡放寬到 4MB 以防未來增大
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

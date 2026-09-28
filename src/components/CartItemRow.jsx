@@ -1,5 +1,6 @@
-import React from 'react';
-import { ui } from '../lib/uiPalette.js';
+import { ui, border } from '../lib/uiPalette.js';
+import { describeComponents, isBundleLine } from '../lib/cart.js';
+import { t } from '../i18n/t.js';
 
 const styles = {
   row: {
@@ -7,36 +8,45 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 14,
-    padding: '16px 0',
-    borderBottom: 'none',
+    padding: '14px 0',
+    borderBottom: `1px solid ${ui.lineSoft}`,
   },
-  left: { display: 'flex', alignItems: 'center', gap: 14, flex: 1 },
-  dot: { width: 10, height: 10, borderRadius: 999, backgroundColor: ui.primary },
+  left: { display: 'flex', alignItems: 'center', gap: 12, flex: 1 },
+  dot: { width: 12, height: 12, borderRadius: 999, border: border.solidSm, backgroundColor: ui.orange, flexShrink: 0 },
   qtyPill: {
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#F7F7F7',
+    gap: 6,
+    backgroundColor: ui.white,
+    border: border.solidSm,
     borderRadius: 999,
-    padding: '8px 12px',
+    padding: 3,
   },
   qtyBtn: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     border: 'none',
-    background: '#FFFFFF',
+    borderRadius: 999,
+    background: 'transparent',
+    color: ui.ink,
     fontSize: 20,
-    fontWeight: 900,
+    fontWeight: 800,
     cursor: 'pointer',
+    lineHeight: 1,
   },
   trash: {
-    border: 'none',
-    backgroundColor: '#FFEDEE',
-    color: ui.primary,
-    padding: '10px 12px',
-    borderRadius: 12,
+    border: border.dashed,
+    backgroundColor: ui.white,
+    color: ui.ink,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
     cursor: 'pointer',
     fontSize: 16,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
   },
 };
 
@@ -51,38 +61,48 @@ export default function CartItemRow({
   return (
     <div style={styles.row}>
       <div style={styles.left}>
-        <div style={{ ...styles.dot, backgroundColor: item?.color || ui.primary }} />
+        <div style={{ ...styles.dot, backgroundColor: item?.color || ui.orange }} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 800 }}>{item?.name}</div>
-          <div style={{ color: ui.muted, fontWeight: 700, fontSize: 12 }}>
+          <div style={{ fontWeight: 800, color: ui.ink }}>
+            {isBundleLine(item) ? (
+              <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999, border: border.solidSm, background: ui.mint, marginRight: 4 }}>
+                {t('sales.bundleBadge')}
+              </span>
+            ) : null}
+            {item?.name}
+          </div>
+          {isBundleLine(item) ? (
+            <div style={{ color: ui.muted, fontWeight: 600, fontSize: 11, lineHeight: 1.4 }}>{describeComponents(item.components)}</div>
+          ) : null}
+          <div style={{ color: ui.muted, fontWeight: 600, fontSize: 12 }}>
             NT${item?.unitPrice ?? 0} / 件
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={styles.qtyPill}>
           <button
             type="button"
-            style={styles.qtyBtn}
+            style={{ ...styles.qtyBtn, opacity: canDec ? 1 : 0.35 }}
             onClick={onDec}
             disabled={!canDec}
           >
             -
           </button>
-          <div style={{ minWidth: 24, textAlign: 'center', fontWeight: 900 }}>
+          <div style={{ minWidth: 24, textAlign: 'center', fontWeight: 800, color: ui.ink }}>
             {item?.qty ?? 1}
           </div>
           <button
             type="button"
-            style={styles.qtyBtn}
+            style={{ ...styles.qtyBtn, opacity: canInc ? 1 : 0.35 }}
             onClick={onInc}
             disabled={!canInc}
           >
             +
           </button>
         </div>
-        <button type="button" style={styles.trash} onClick={onRemove}>
+        <button type="button" style={styles.trash} onClick={onRemove} aria-label="移除">
           🗑️
         </button>
       </div>

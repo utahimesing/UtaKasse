@@ -1,78 +1,87 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProductCard from '../components/ProductCard.jsx';
 import CheckoutModal from '../components/CheckoutModal.jsx';
+import BundlePickerModal from '../components/BundlePickerModal.jsx';
 import Toast from '../components/Toast.jsx';
 import db, { createUUID } from '../db.js';
 import { evalBonuses } from '../lib/bonuses.js';
+import { calcCartTotals } from '../lib/promo.js';
+import {
+  addLine, setLineQty, removeLine, makeSingleLine, makeBundleLine,
+  maxQtyForLine, qtyOfProductInCart, usageByProduct, lineToTxItem,
+} from '../lib/cart.js';
 import { getTaipeiDateKey, getTaipeiTimeHMS } from '../lib/dateTaipei.js';
 import { useToast } from '../lib/useToast.js';
-import { t } from '../i18n/t.js';
 import { getString } from '../lib/strings.js';
+import { t } from '../i18n/t.js';
+import { ui, border, shadow, checkoutCta } from '../lib/uiPalette.js';
+
 const styles = {
   page: {
     height: 'calc(100vh - 188px)', minHeight: 520,
-    background: 'transparent', fontFamily: 'DM Sans, sans-serif',
-    color: '#3D3060', display: 'flex', flexDirection: 'column',
-    gap: 18, overflow: 'hidden', position: 'relative',
+    background: 'transparent', fontFamily: 'inherit',
+    color: ui.ink, display: 'flex', flexDirection: 'column',
+    gap: 14, overflow: 'hidden', position: 'relative',
   },
-  headerSpacer: { height: 0 }, // 清掉，由 App.jsx 的 contentPad 統一控制
+  // 場次提示：白底黑框小標籤；未設定時改杏色提醒
+  eventTag: (ok) => ({
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    fontSize: 12, fontWeight: 700, color: ui.ink,
+    padding: '5px 10px', borderRadius: 999,
+    border: border.solidSm,
+    background: ok ? ui.white : ui.apricot,
+    alignSelf: 'flex-start',
+  }),
   categoryRow: {
     display: 'flex',
-    gap: 4,
-    padding: '0 4px 12px',
-    borderBottom: '1px solid rgba(0,0,0,0.06)',
-    marginBottom: 12,
+    gap: 8,
+    padding: '2px 6px 10px 2px', // 右／下留給硬陰影
+    borderBottom: `2px solid ${ui.ink}`,
+    marginBottom: 4,
     overflowX: 'auto',
     scrollbarWidth: 'none',
     msOverflowStyle: 'none',
     WebkitOverflowScrolling: 'touch',
     flexShrink: 0,
   },
+  // 類別 chip：圓角 pill、黑框、選中杏色
   categoryPill: (active) => ({
-    flex: 1, // 從 '0 0 auto' 改成 1
-    minWidth: 72, // 類別超過 5 個時不會擠爆，改為橫向捲動
-    padding: '10px 18px',
-    borderRadius: 20,
-    fontWeight: 800,
+    flex: '0 0 auto',
+    minWidth: 72,
+    height: 36,
+    padding: '0 16px',
+    borderRadius: 999,
+    fontWeight: 700,
     fontSize: 13,
-    border: active
-      ? '1.5px solid rgba(255,255,255,0.30)'
-      : '1.5px solid rgba(255,255,255,0.58)',
-    backgroundColor: active ? '#80A1D4' : 'rgba(255,255,255,0.38)',
-    WebkitBackdropFilter: 'blur(10px)',
-    backdropFilter: 'blur(10px)',
-    color: active ? '#FFFFFF' : '#9A8898',
+    border: border.solidSm,
+    backgroundColor: active ? ui.apricot : ui.white,
+    color: ui.ink,
     cursor: 'pointer',
-    boxShadow: active
-      ? '0 6px 18px rgba(128,161,212,0.36)'
-      : '0 1px 8px rgba(180,140,220,0.10)',
-    transition: 'all 0.18s ease',
+    boxShadow: active ? shadow.sm : 'none',
+    transition: 'background 0.15s ease',
     whiteSpace: 'nowrap',
   }),
-  productListContainer: { flexGrow: 1, overflowY: 'auto', paddingBottom: 14, minHeight: 0 },
-  productGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 },
-  stickyBar: { display: 'flex', gap: 12, padding: '10px 0 6px', flexShrink: 0 },
+  productListContainer: { flexGrow: 1, overflowY: 'auto', padding: '2px 6px 14px 2px', minHeight: 0 },
+  productGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 },
+  stickyBar: { display: 'flex', gap: 12, padding: '10px 8px 8px 0', flexShrink: 0 },
   cancelBtn: {
-    flex: '0 0 auto', padding: '14px 20px', borderRadius: 18,
-    border: '1.5px solid rgba(255,255,255,0.65)',
-    background: 'rgba(255,255,255,0.52)',
-    backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-    fontWeight: 700, fontSize: 13, color: '#8B85A0',
+    flex: '0 0 auto', padding: '10px 16px', borderRadius: 10, minHeight: 44,
+    border: border.dashed,
+    background: ui.white,
+    fontWeight: 700, fontSize: 13, color: ui.ink,
     cursor: 'pointer', lineHeight: 1.3, textAlign: 'center',
+    boxShadow: shadow.sm,
   },
+  // 總額按鈕＝結帳 CTA：橘色實色、shadow-lg、20px／800
   totalBtn: {
-    flex: 1, padding: '16px 20px', borderRadius: 18, border: 'none',
-    background: 'linear-gradient(135deg, #9BBCE8 0%, #80A1D4 100%)',
-    color: '#FFFFFF', fontWeight: 800, fontSize: 16,
-    boxShadow: '0 8px 24px rgba(128,161,212,0.38)',
-    cursor: 'pointer', letterSpacing: '0.01em',
+    flex: 1, padding: '12px 20px', borderRadius: 10, minHeight: 44,
+    background: checkoutCta.background,
+    border: checkoutCta.border,
+    color: checkoutCta.color, fontWeight: checkoutCta.fontWeight, fontSize: checkoutCta.fontSize,
+    boxShadow: checkoutCta.shadow,
+    cursor: 'pointer', letterSpacing: '-0.01em',
   },
 };
-
-function clampQty(qty, min, max) {
-  const n = Number.isFinite(qty) ? qty : min;
-  return Math.max(min, Math.min(max, n));
-}
 
 function isUncategorizedCategory(category) {
   if (category === null || category === undefined) return true;
@@ -98,13 +107,17 @@ function makeReceiptNo() {
   return out;
 }
 
+const MAX_RECEIPT_TRIES = 1000;
+
 async function generateUniqueReceiptNo() {
   const txs = await db.transactions.toArray();
   const used = new Set(txs.map((tx) => String(tx.receiptNo ?? '').trim()).filter(Boolean));
   let receiptNo = makeReceiptNo();
-  while (used.has(receiptNo)) {
+  // 有上限的迴圈：5 碼 32 進位有 3,300 萬種組合，實務上第一次就會成功
+  for (let i = 0; i < MAX_RECEIPT_TRIES && used.has(receiptNo); i++) {
     receiptNo = makeReceiptNo();
   }
+  if (used.has(receiptNo)) receiptNo = `${receiptNo}${Date.now().toString(36).slice(-3).toUpperCase()}`;
   return receiptNo;
 }
 
@@ -112,11 +125,13 @@ export default function Sales({ products = [], categories = [], refreshProducts 
   const topRef = useRef(null);
 
   const [activeCategory, setActiveCategory] = useState('全部');
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState([]); // 以 lineId 為鍵，見 src/lib/cart.js
+  const [bundlePicking, setBundlePicking] = useState(null); // 正在選款的套組商品
 
   const [bonusRules, setBonusRules] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  const [activeEventName, setActiveEventName] = useState('');
 
   const [cashInput, setCashInput] = useState('0');
   const [checkoutPhase, setCheckoutPhase] = useState('idle'); // idle | done
@@ -135,22 +150,21 @@ export default function Sales({ products = [], categories = [], refreshProducts 
         .filter((m) => !!m.enabled)
         .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
       setPaymentMethods(pms);
-      if (pms.length > 0) {
-        setSelectedPaymentId((prev) => (prev && pms.some((m) => m.id === prev) ? prev : pms[0].id));
-      }
+      // 付款方式清單變動時，選到的付款方式若已不存在就退回第一個
+      setSelectedPaymentId((prev) => (prev && pms.some((m) => m.id === prev) ? prev : (pms[0]?.id ?? null)));
+
+      const allEvents = await db.events.toArray();
+      const activeEvent = allEvents.find((e) => e.status === 'active' && !e.archived) ?? null;
+      setActiveEventName(activeEvent?.name ?? '');
     }
     load().catch((e) => console.error(e));
   }, [refreshProducts]);
 
-  useEffect(() => {
-    if (paymentMethods.length === 0) {
-      setSelectedPaymentId(null);
-      return;
-    }
-    if (!selectedPaymentId || !paymentMethods.some((m) => m.id === selectedPaymentId)) {
-      setSelectedPaymentId(paymentMethods[0].id);
-    }
-  }, [paymentMethods, selectedPaymentId]);
+  const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const getStock = useCallback((productId) => {
+    const p = productsById.get(productId);
+    return p ? p.stock : null;
+  }, [productsById]);
 
   const categoryTabs = useMemo(() => {
     const normalized = categories.length > 0
@@ -163,10 +177,10 @@ export default function Sales({ products = [], categories = [], refreshProducts 
     return normalized;
   }, [categories, products]);
 
-  useEffect(() => {
-    if (activeCategory === '全部') return;
-    const exists = categoryTabs.some((c) => c.name === activeCategory);
-    if (!exists) setActiveCategory('全部');
+  // 選到的類別被刪掉時退回「全部」：在 render 時決定，不用 effect 裡 setState
+  const effectiveCategory = useMemo(() => {
+    if (activeCategory === '全部') return activeCategory;
+    return categoryTabs.some((c) => c.name === activeCategory) ? activeCategory : '全部';
   }, [activeCategory, categoryTabs]);
 
   const categoryNameToId = useMemo(() => {
@@ -180,41 +194,51 @@ export default function Sales({ products = [], categories = [], refreshProducts 
   const visibleProducts = useMemo(() => {
     const sellingProducts = products.filter((p) => !isArchivedProduct(p));
     let filtered = sellingProducts;
-    if (activeCategory === '未分類') {
+    if (effectiveCategory === '未分類') {
       filtered = sellingProducts.filter(
         (p) =>
           isUncategorizedCategory(p.category) &&
           !(Array.isArray(p.categoryIds) && p.categoryIds.length > 0),
       );
-    } else if (activeCategory !== '全部') {
-      const selectedCategoryId = categoryNameToId.get(activeCategory);
+    } else if (effectiveCategory !== '全部') {
+      const selectedCategoryId = categoryNameToId.get(effectiveCategory);
       filtered = sellingProducts.filter((p) => {
-        const legacyMatch = String(p.category ?? '').trim() === activeCategory;
+        const legacyMatch = String(p.category ?? '').trim() === effectiveCategory;
         const relationMatch = Array.isArray(p.categoryIds) && selectedCategoryId
           ? p.categoryIds.includes(selectedCategoryId)
           : false;
         return legacyMatch || relationMatch;
       });
     }
-    return [...filtered].sort((a, b) => Number(isNewProduct(b)) - Number(isNewProduct(a)));
-  }, [products, activeCategory, categoryNameToId]);
+    return [...filtered].sort((a, b) => {
+      const aOrder = a.sortOrder;
+      const bOrder = b.sortOrder;
+      const aHasOrder = aOrder != null && Number.isFinite(Number(aOrder));
+      const bHasOrder = bOrder != null && Number.isFinite(Number(bOrder));
+      if (aHasOrder && bHasOrder && aOrder !== bOrder) return aOrder - bOrder;
+      if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+      return Number(isNewProduct(b)) - Number(isNewProduct(a));
+    });
+  }, [products, effectiveCategory, categoryNameToId]);
 
+  // 合購折扣（全購物車最佳化）：購物車一有變動就重算
+  const totals = useMemo(() => calcCartTotals(cart, bonusRules), [cart, bonusRules]);
+  const totalAmount = totals.subtotal;
+
+  // 滿額禮用折扣後金額判斷；合購 gift 模式看能不能湊滿一組
   const cartItemsForBonuses = useMemo(() => {
     return cart.map((it) => ({
       productId: it.productId,
       qty: it.qty,
-      sub: it.unitPrice * it.qty,
+      kind: it.kind,
+      sub: it.unitPrice * it.qty - (totals.discountByProductId.get(it.productId) ?? 0),
       catIds: it.categoryIds ?? [],
     }));
-  }, [cart]);
+  }, [cart, totals]);
 
   const bonusesTriggered = useMemo(() => {
     return evalBonuses(cartItemsForBonuses, bonusRules);
   }, [cartItemsForBonuses, bonusRules]);
-
-  const totalAmount = useMemo(() => {
-    return cart.reduce((s, it) => s + it.unitPrice * it.qty, 0);
-  }, [cart]);
 
   const selectedPayment = useMemo(() => {
     return paymentMethods.find((m) => m.id === selectedPaymentId) ?? null;
@@ -236,21 +260,9 @@ export default function Sales({ products = [], categories = [], refreshProducts 
   }
 
   async function ensureActiveEvent() {
-    const dateKey = getTaipeiDateKey(new Date());
     const allEvents = await db.events.toArray();
-    let evt = allEvents.find((e) => e.status === 'active' && !e.archived) ?? null;
-    if (evt) return evt;
-
-    // If no active event exists, create a default one for this device.
-    evt = {
-      id: createUUID(),
-      name: '活動',
-      date: dateKey,
-      status: 'active',
-      archived: false,
-      createdAt: Date.now(),
-    };
-    await db.events.add(evt);
+    const evt = allEvents.find((e) => e.status === 'active' && !e.archived) ?? null;
+    if (!evt) throw new Error('NO_ACTIVE_EVENT');
     return evt;
   }
 
@@ -258,11 +270,7 @@ export default function Sales({ products = [], categories = [], refreshProducts 
     setCart((prev) => {
       if (prev.length === 0) return prev;
       const last = prev[prev.length - 1];
-      if (last.qty > 1) {
-        return prev.map((x) =>
-          x.productId === last.productId ? { ...x, qty: x.qty - 1 } : x,
-        );
-      }
+      if (last.qty > 1) return setLineQty(prev, last.lineId, last.qty - 1, getStock);
       return prev.slice(0, -1);
     });
   }
@@ -277,59 +285,59 @@ export default function Sales({ products = [], categories = [], refreshProducts 
   }
 
   function addToCart(product) {
+    if ((product.type ?? 'single') === 'bundle') {
+      setBundlePicking(product);
+      return;
+    }
+    setCart((prev) => addLine(prev, makeSingleLine(product), getStock));
+  }
+
+  function confirmBundle(components) {
+    const product = bundlePicking;
+    setBundlePicking(null);
+    if (!product) return;
+    setCart((prev) => addLine(prev, makeBundleLine(product, components), getStock));
+  }
+
+  function incQty(lineId) {
     setCart((prev) => {
-      const ex = prev.find((x) => x.productId === product.id);
-      const stock = product.stock;
-      const canClick = stock === null || typeof stock === 'undefined' || stock > 0;
-      if (!canClick) return prev;
-
-      if (!ex) {
-        return [
-          ...prev,
-          {
-            productId: product.id,
-            name: product.name,
-            unitPrice: product.price,
-            qty: 1,
-            color: product.color,
-            categoryIds: product.categoryIds ?? [],
-            stock,
-          },
-        ];
-      }
-
-      const maxQty = stock === null || typeof stock === 'undefined' ? Number.MAX_SAFE_INTEGER : stock;
-      const nextQty = clampQty(ex.qty + 1, 1, maxQty);
-      if (nextQty === ex.qty) return prev;
-      return prev.map((x) => (x.productId === product.id ? { ...x, qty: nextQty, stock } : x));
+      const line = prev.find((x) => x.lineId === lineId);
+      return line ? setLineQty(prev, lineId, line.qty + 1, getStock) : prev;
     });
   }
 
-  function incQty(productId) {
-    const p = products.find((x) => x.id === productId);
-    if (!p) return;
-    setCart((prev) => prev.map((x) => (x.productId === productId ? { ...x, qty: clampQty(x.qty + 1, 1, p.stock ?? Number.MAX_SAFE_INTEGER) } : x)));
+  function decQty(lineId) {
+    setCart((prev) => {
+      const line = prev.find((x) => x.lineId === lineId);
+      return line ? setLineQty(prev, lineId, line.qty - 1, getStock) : prev;
+    });
   }
 
-  function decQty(productId) {
-    setCart((prev) => prev.map((x) => (x.productId === productId ? { ...x, qty: clampQty(x.qty - 1, 1, x.stock ?? Number.MAX_SAFE_INTEGER) } : x)));
-  }
-
-  function removeFromCart(productId) {
-    setCart((prev) => prev.filter((x) => x.productId !== productId));
+  function removeFromCart(lineId) {
+    setCart((prev) => removeLine(prev, lineId));
     // Trash click => Toast A1
     toast.show(getString('A1'));
   }
 
+  const getMaxQty = useCallback((line) => maxQtyForLine(line, cart, getStock), [cart, getStock]);
+
   async function commitSale() {
-    const event = await ensureActiveEvent();
+    let event;
+    try {
+      event = await ensureActiveEvent();
+    } catch (e) {
+      if (e?.message === 'NO_ACTIVE_EVENT') {
+        toast.show(t('sales.noEventToast'), 'error');
+        return null;
+      }
+      throw e;
+    }
     const createdAt = Date.now();
     const taipeiDate = getTaipeiDateKey(new Date(createdAt));
     const time = getTaipeiTimeHMS(new Date(createdAt));
 
-    const payment = selectedPayment ?? { id: 'pm-cash', name: '現金', isCash: true };
     const payments = selectedPayment ? [
-      { methodId: payment.id, methodName: payment.name, amount: totalAmount, isCash: payment.isCash },
+      { methodId: selectedPayment.id, methodName: selectedPayment.name, amount: totalAmount, isCash: selectedPayment.isCash },
     ] : [];
 
     const bonuses = bonusesTriggered.map((b) => ({
@@ -348,29 +356,25 @@ export default function Sales({ products = [], categories = [], refreshProducts 
       time,
       type: 'sale',
       preorderId: null,
-      items: cart.map((it) => ({
-        productId: it.productId,
-        productName: it.name,
-        qty: it.qty,
-        unitPrice: it.unitPrice,
-      })),
-      subtotal: totalAmount,
+      items: cart.map(lineToTxItem),
+      subtotal: totalAmount,                    // 折扣後實收（沿用欄位）
+      grossAmount: totals.grossAmount,          // 折扣前
+      discounts: totals.discounts,              // [{ ruleId, ruleName, times, amount }]
+      discountApproximate: !!totals.approximate,
       payments,
       depositAlreadyPaid: 0,
       bonusesTriggered: bonuses,
       note: null,
     };
 
-    await db.transaction('rw', db.products, db.transactions, db.preOrders, async () => {
-      // 1) Reduce stock (if stock is a number).
-      for (const it of cart) {
-        if (typeof it.stock === 'number') {
-          await db.products.update(it.productId, {
-            stock: Math.max(0, (it.stock ?? 0) - it.qty),
-          });
-        }
+    // 扣庫存＋寫交易包在同一個 transaction：任何一步失敗就整筆回滾
+    const usage = usageByProduct(cart); // 單賣 ＋ 套組本身 ＋ 套組內容物 合併
+    await db.transaction('rw', db.products, db.transactions, async () => {
+      for (const [productId, used] of usage) {
+        const prod = await db.products.get(productId);
+        if (!prod || typeof prod.stock !== 'number') continue;
+        await db.products.update(productId, { stock: Math.max(0, prod.stock - used) });
       }
-      // 2) Write transaction.
       await db.transactions.add(tx);
     });
     return receiptNo;
@@ -383,7 +387,7 @@ export default function Sales({ products = [], categories = [], refreshProducts 
     if (selectedPayment?.isCash) {
       const cashInt = parseInt(cashInput, 10) || 0;
       if (cashInt < totalAmount) {
-        toast.show(getString('A3'));
+        toast.show(getString('S11'), 'error');
         return;
       }
     }
@@ -392,6 +396,10 @@ export default function Sales({ products = [], categories = [], refreshProducts 
 
     try {
       const receiptNo = await commitSale();
+      if (!receiptNo) {
+        setCheckoutPhase('idle');
+        return;
+      }
       await refreshProducts?.();
       // 0.8s animation window
       setTimeout(() => {
@@ -400,12 +408,13 @@ export default function Sales({ products = [], categories = [], refreshProducts 
         setCheckoutPhase('idle');
         topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Checkout success => Toast A2 + receipt number
-        toast.show(`${getString('A2')}${receiptNo}`);
+        toast.show(`${getString('A2')}${receiptNo}`, 'success');
         setShowCheckout(false);
       }, 800);
     } catch (e) {
       console.error(e);
       setCheckoutPhase('idle');
+      toast.show(t('admin.err.saveFailed'), 'error');
     }
   }
 
@@ -420,7 +429,9 @@ export default function Sales({ products = [], categories = [], refreshProducts 
     <div style={styles.page}>
       <div ref={topRef} className="topRef" />
 
-      <div style={styles.headerSpacer} />
+      <div style={styles.eventTag(!!activeEventName)}>
+        {activeEventName ? `📍 ${activeEventName}` : t('sales.noEventTag')}
+      </div>
 
       <div style={styles.categoryRow}>
         {categoryTabs.map((c) => (
@@ -428,7 +439,7 @@ export default function Sales({ products = [], categories = [], refreshProducts 
             key={c.id}
             type="button"
             onClick={() => setActiveCategory(c.name)}
-            style={styles.categoryPill(activeCategory === c.name)}
+            style={styles.categoryPill(effectiveCategory === c.name)}
           >
             {c.name}
           </button>
@@ -437,24 +448,14 @@ export default function Sales({ products = [], categories = [], refreshProducts 
 
       <div style={styles.productListContainer}>
         <div style={styles.productGrid}>
-          {visibleProducts.map((p) => {
-            const cartQty = cart.find((x) => x.productId === p.id)?.qty ?? 0;
-            return (
-              <ProductCard
-                key={p.id}
-                product={{
-                  ...p,
-                  stock: typeof p.stock === 'number' ? p.stock : p.stock,
-                }}
-                cartQty={cartQty}
-                nameStyle={{
-                  color: '#3F3A46',
-                  textShadow: '0 1px 0 rgba(255,255,255,0.55), 0 1px 6px rgba(180,140,220,0.12)',
-                }}
-                onClick={() => addToCart(p)}
-              />
-            );
-          })}
+          {visibleProducts.map((p) => (
+            <ProductCard
+              key={p.id}
+              product={p}
+              cartQty={qtyOfProductInCart(cart, p.id)}
+              onClick={() => addToCart(p)}
+            />
+          ))}
         </div>
       </div>
 
@@ -472,9 +473,9 @@ export default function Sales({ products = [], categories = [], refreshProducts 
             onPointerLeave={(e) => clearTimeout(e.currentTarget._lp)}
             onContextMenu={(e) => { e.preventDefault(); clearAll(); }}
           >
-            取消
-            <span style={{ display: 'block', fontSize: 10, opacity: 0.65, marginTop: 2 }}>
-              長按清全部
+            {t('sales.cancel')}
+            <span style={{ display: 'block', fontSize: 10, color: ui.muted, marginTop: 2 }}>
+              {t('sales.cancelHint')}
             </span>
           </button>
           <button
@@ -482,20 +483,36 @@ export default function Sales({ products = [], categories = [], refreshProducts 
             style={styles.totalBtn}
             onClick={() => setShowCheckout(true)}
           >
-            [{totalQty} 件]　NT${totalAmount}
+            [{totalQty} 件]{' '}NT${totalAmount}
+            {totals.totalDiscount > 0 ? (
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 700, marginTop: 2 }}>
+                🏷️ {t('sales.discountTotal')} −NT${totals.totalDiscount}
+              </span>
+            ) : null}
           </button>
         </div>
+      )}
+
+      {bundlePicking && (
+        <BundlePickerModal
+          product={bundlePicking}
+          products={products}
+          cart={cart}
+          getStock={getStock}
+          onConfirm={confirmBundle}
+          onClose={() => setBundlePicking(null)}
+        />
       )}
 
       {showCheckout && (
         <CheckoutModal
           cart={cart}
-          products={products}
+          totals={totals}
           totalAmount={totalAmount}
+          getMaxQty={getMaxQty}
           paymentMethods={paymentMethods}
           selectedPaymentId={selectedPaymentId}
           setSelectedPaymentId={setSelectedPaymentId}
-          cashInput={cashInput}
           setCashInput={setCashInput}
           cashValue={cashValue}
           changeAmount={changeAmount}
@@ -514,7 +531,7 @@ export default function Sales({ products = [], categories = [], refreshProducts 
         />
       )}
 
-      <Toast message={toast.message} visible={toast.visible} />
+      <Toast message={toast.message} visible={toast.visible} variant={toast.variant} />
     </div>
   );
 }

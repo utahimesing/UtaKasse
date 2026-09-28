@@ -34,3 +34,13 @@ UtaKasse-web-OAth.json
 *.njsproj
 *.sln
 *.sw?
+
+# 根目錄不放 build 產物（正確位置是 dist/，靜態資源在 public/）
+/assets/
+/sw.js
+/workbox-*.js
+/manifest.webmanifest
+*.zip
+
+# Claude Code 個人設定（每台電腦不同）
+.claude/settings.local.json
