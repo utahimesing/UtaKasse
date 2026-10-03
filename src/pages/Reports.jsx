@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import db from '../db.js';
+import db, { voidTransaction } from '../db.js';
 import { getTaipeiDateKey } from '../lib/dateTaipei.js';
 import { useToast } from '../lib/useToast.js';
-import { t } from '../i18n/t.js';
+import { t, tf } from '../i18n/t.js';
+import { isVoided } from '../lib/voidTx.js';
 import Toast from '../components/Toast.jsx';
 import Button from '../components/Button.jsx';
 import TxDetailList from '../components/TxDetailList.jsx';
@@ -166,6 +167,21 @@ export default function Reports() {
     }
   }
 
+  async function onVoidTx(tx, reason) {
+    if (selectedEventIsArchived) {
+      toast.show(t('void.readOnly'), 'error');
+      return;
+    }
+    try {
+      const { preorderReset } = await voidTransaction(tx.id, { reason });
+      toast.show(preorderReset ? t('void.donePreorder') : tf('void.done', { no: tx.receiptNo ?? '—' }), 'success');
+    } catch (e) {
+      console.error(e);
+      toast.show(`${t('void.failed')}：${e instanceof Error ? e.message : '未知錯誤'}`, 'error');
+    }
+    await loadData();
+  }
+
   function onExportCsv() {
     const { files } = buildRevenueCsvForEventDate({
       eventName: selectedEvent?.name,
@@ -238,7 +254,12 @@ export default function Reports() {
 
         {/* 本日交易明細（可收合） */}
         <div style={{ marginTop: 20 }}>
-          <TxDetailList transactions={txsForEvent} dateKey={selectedDateKey} />
+          <TxDetailList
+            transactions={txsForEvent}
+            dateKey={selectedDateKey}
+            onVoid={onVoidTx}
+            readOnly={selectedEventIsArchived}
+          />
         </div>
 
         {/* 參考數字：白色次要指標卡 */}
@@ -311,10 +332,13 @@ export default function Reports() {
 }
 
 function txsCountText(transactions, dateKey) {
-  const txs = transactions.filter((t) => t.date === dateKey);
+  const dayTxs = transactions.filter((t) => t.date === dateKey);
+  const txs = dayTxs.filter((t) => !isVoided(t));
+  const voidedCount = dayTxs.length - txs.length;
   const saleCount = txs.filter((t) => calcTxKind(t) === '現場').length;
   const preorderBCount = txs.filter((t) => calcTxKind(t) === '預購B').length;
   const aCount = txs.filter((t) => calcTxKind(t) === '預購A').length;
   const onlineStoreCount = txs.filter((t) => calcTxKind(t) === '通販').length;
-  return `現場 ${saleCount} 筆 / 預購B ${preorderBCount} 筆 / 預購A ${aCount} 筆 / 通販 ${onlineStoreCount} 筆`;
+  const base = `現場 ${saleCount} 筆 / 預購B ${preorderBCount} 筆 / 預購A ${aCount} 筆 / 通販 ${onlineStoreCount} 筆`;
+  return voidedCount > 0 ? `${base} / ${tf('reports.voidedCount', { n: voidedCount })}` : base;
 }

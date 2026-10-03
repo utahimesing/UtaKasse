@@ -5,6 +5,7 @@ import {
   migrateBackupPayload,
   migrateBonusRuleV3toV4,
 } from './lib/migrations.js';
+import { isVoided, txStockUsage, normalizeVoidReason } from './lib/voidTx.js';
 
 /**
  * Dexie database (IndexedDB)
@@ -223,6 +224,14 @@ export function validateBackupPayload(data) {
     }
   });
 
+  // v1.1.1 作廢欄位（選填）
+  (data.transactions ?? []).forEach((tx, idx) => {
+    if (typeof tx.voided !== 'undefined') ensureBoolean(tx.voided, `transactions[${idx}].voided`);
+    if (tx.voided === true && tx.voidReason != null) {
+      ensureString(tx.voidReason, `transactions[${idx}].voidReason`, { max: 200, allowEmpty: true });
+    }
+  });
+
   (data.paymentMethods ?? []).forEach((pm, idx) => {
     ensureString(pm.name, `paymentMethods[${idx}].name`, { max: 80 });
     ensureBoolean(pm.enabled, `paymentMethods[${idx}].enabled`);
@@ -232,6 +241,38 @@ export function validateBackupPayload(data) {
 }
 
 export default db;
+
+// ===== 作廢交易（v1.1.1）：保留紀錄、加回庫存、預購取件改回未取件 =====
+// 全部包在同一個 transaction：任何一步失敗就整筆回滾
+export async function voidTransaction(txId, { reason = '' } = {}) {
+  return db.transaction('rw', db.transactions, db.products, db.preOrders, async () => {
+    const tx = await db.transactions.get(txId);
+    if (!tx) throw new Error('找不到這筆交易');
+    if (isVoided(tx)) throw new Error('這筆交易已經作廢過了');
+
+    for (const [productId, qty] of txStockUsage(tx)) {
+      const prod = await db.products.get(productId);
+      if (!prod || typeof prod.stock !== 'number') continue; // 已刪除或不限庫存
+      await db.products.update(productId, { stock: prod.stock + qty });
+    }
+
+    await db.transactions.update(txId, {
+      voided: true,
+      voidedAt: Date.now(),
+      voidReason: normalizeVoidReason(reason),
+    });
+
+    let preorderReset = false;
+    if (tx.type === 'preorder_pickup' && tx.preorderId) {
+      const po = await db.preOrders.get(tx.preorderId);
+      if (po && po.status === 'collected' && (!po.transactionId || po.transactionId === tx.id)) {
+        await db.preOrders.update(po.id, { status: 'pending', collectedAt: null, transactionId: null });
+        preorderReset = true;
+      }
+    }
+    return { preorderReset };
+  });
+}
 // ===== 備份：讀出所有資料 =====
 export async function exportAllData() {
   const [

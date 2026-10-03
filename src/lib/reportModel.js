@@ -4,6 +4,7 @@
  * 輸入的 transactions 是「選定場次」的交易；這裡再用 dateKey 過濾出當天。
  */
 import { calcTxKind, getTxPaymentLabel } from './reporting.js';
+import { isVoided, VOID_KIND } from './voidTx.js';
 
 export function txDiscountTotal(tx) {
   return (Array.isArray(tx?.discounts) ? tx.discounts : []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
@@ -62,15 +63,19 @@ export function describeTxItems(tx) {
 
 /**
  * 流水帳模型
- * → { dateKey, txs, columns, rows, footer }
+ * → { dateKey, txs, voidedTxs, columns, rows, footer }
+ * txs        = 當天「有效」交易（作廢的不算），彙總一律用這個
  * columns[i] = { key, productId, name, categoryIds, isBundle }
- * rows[i]    = { id, receiptNo, createdAt, time, kind, qtyByKey(Map), discount(負數或 0), subtotal, paymentLabel, activities, bundleContents, note }
+ * rows[i]    = { id, receiptNo, createdAt, time, kind, qtyByKey(Map), discount(負數或 0), subtotal, paymentLabel, activities, bundleContents, note, voided }
+ *              作廢的交易仍列一列（類型＝作廢，數量／金額都是 0，備註寫原內容），方便對帳
  * footer     = { qtyByKey(Map), amountByKey(Map), subtotal, discount, gross }
  */
 export function buildLedgerModel({ dateKey, transactions, products = [], categories = [] }) {
-  const txs = (transactions ?? [])
+  const dayTxs = (transactions ?? [])
     .filter((tx) => tx.date === dateKey)
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const txs = dayTxs.filter((tx) => !isVoided(tx));
+  const voidedTxs = dayTxs.filter((tx) => isVoided(tx));
 
   const productsById = new Map(products.map((p) => [p.id, p]));
   const catOrder = new Map(categories.map((c) => [c.id, Number.isFinite(c.sortOrder) ? c.sortOrder : 999999]));
@@ -103,7 +108,8 @@ export function buildLedgerModel({ dateKey, transactions, products = [], categor
     return String(a.name).localeCompare(String(b.name), 'zh-Hant');
   });
 
-  const rows = txs.map((tx, idx) => {
+  const rows = dayTxs.map((tx, idx) => {
+    if (isVoided(tx)) return voidedRow(tx, idx);
     const qtyByKey = new Map();
     for (const it of tx.items ?? []) {
       const key = columnKeyOf(it);
@@ -123,10 +129,37 @@ export function buildLedgerModel({ dateKey, transactions, products = [], categor
       activities: describeTxActivities(tx),
       bundleContents: describeTxBundles(tx),
       note: tx.note ?? '',
+      voided: false,
     };
   });
 
-  return { dateKey, txs, columns, rows, footer: buildFooter(columns, rows, txs) };
+  return { dateKey, txs, voidedTxs, columns, rows, footer: buildFooter(columns, rows, txs) };
+}
+
+/** 作廢交易的備註：`作廢｜原 NT$300：海報A×1｜原因：結錯帳｜原備註` */
+export function describeVoidedTx(tx) {
+  const parts = [`${VOID_KIND}｜原 NT$${tx?.subtotal ?? 0}：${describeTxItems(tx)}`];
+  if (tx?.voidReason) parts.push(`原因：${tx.voidReason}`);
+  if (tx?.note) parts.push(tx.note);
+  return parts.join('｜');
+}
+
+function voidedRow(tx, idx) {
+  return {
+    id: tx.id,
+    receiptNo: tx.receiptNo ?? String(idx + 1),
+    createdAt: tx.createdAt ?? null,
+    time: tx.time ?? '',
+    kind: VOID_KIND,
+    qtyByKey: new Map(), // 數量全部 0：Excel 欄位加總不會算到
+    discount: 0,
+    subtotal: 0,
+    paymentLabel: getTxPaymentLabel(tx),
+    activities: '',
+    bundleContents: '',
+    note: describeVoidedTx(tx),
+    voided: true,
+  };
 }
 
 function buildFooter(columns, rows, txs) {
@@ -317,12 +350,24 @@ export function buildSummaryModel({ dateKey, transactions, products = [], catego
   rows.push(['所有管道總銷售金額 + 預購B訂金（場外已收）', '', '', ...blank(), equationRhs, '', '']);
   rows.push(['差異（應為 0）', '', '', ...blank(), equationLhs - equationRhs, '', '']);
 
+  const { voidedTxs } = ledger;
+  const voidedAmount = sumBy(voidedTxs, (t) => t.subtotal ?? 0);
+  if (voidedTxs.length > 0) {
+    rows.push([]);
+    rows.push(['▸ 作廢紀錄（已從以上所有數字扣除）']);
+    rows.push(['作廢交易原金額合計', '', '', ...blank(), voidedAmount, '', `（筆數 ${voidedTxs.length}）`]);
+    for (const tx of voidedTxs) {
+      rows.push([`#${tx.receiptNo ?? '—'} ${tx.time ?? ''}`, '', '', ...blank(), tx.subtotal ?? 0, '', describeVoidedTx(tx)]);
+    }
+  }
+
   return {
     columns,
     rows,
     totals: {
       goodsTotal, discountTotal, todayRealTotal, preorderARefTotal, preorderBDepositTotal, onlineStoreTotal, allTotal,
       equationLhs, equationRhs, equationDiff: equationLhs - equationRhs,
+      voidedCount: voidedTxs.length, voidedAmount,
       shippedByKey: shipped,
     },
   };
