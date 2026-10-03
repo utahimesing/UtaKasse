@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isVoided, activeTxs, txStockUsage, normalizeVoidReason, VOID_KIND } from '../voidTx.js';
+import { isVoided, txStockUsage, normalizeVoidReason, VOID_KIND } from '../voidTx.js';
 import { buildLedgerModel, buildSummaryModel, buildCategorySheets } from '../reportModel.js';
 import { calcTodayRevenueSummaryForEventDate, buildTransactionsCsvText, buildSummaryCsvText } from '../reporting.js';
 import { buildXlsxArrayBuffer } from '../exportXlsx.js';
@@ -34,7 +34,7 @@ describe('作廢判斷', () => {
     expect(isVoided(ok)).toBe(false);
     expect(isVoided({ voided: 'true' })).toBe(false);
     expect(isVoided(null)).toBe(false);
-    expect(activeTxs(txs).map((t) => t.id)).toEqual(['ok']);
+    expect(txs.filter((t) => !isVoided(t)).map((t) => t.id)).toEqual(['ok']);
   });
   it('原因去頭尾空白、最多 100 字', () => {
     expect(normalizeVoidReason('  退款 ')).toBe('退款');

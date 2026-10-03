@@ -10,11 +10,6 @@ export function txDiscountTotal(tx) {
   return (Array.isArray(tx?.discounts) ? tx.discounts : []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
 }
 
-export function txGross(tx) {
-  if (Number.isFinite(tx?.grossAmount)) return tx.grossAmount;
-  return (tx?.subtotal ?? 0) + txDiscountTotal(tx);
-}
-
 function itemAmount(it) {
   return (Number(it?.qty) || 0) * (Number(it?.unitPrice) || 0);
 }
@@ -29,6 +24,18 @@ function compareSortOrder(a, b) {
   if (aHas && bHas && a !== b) return a - b;
   if (aHas !== bHas) return aHas ? -1 : 1;
   return 0;
+}
+
+/** 商品欄排序：類別 sortOrder → 商品 sortOrder → 名稱。多類別的放第一個類別；沒類別的排最後 */
+function columnComparator(catOrder) {
+  return (a, b) => {
+    const ca = a.categoryIds[0] != null ? (catOrder.get(a.categoryIds[0]) ?? 999998) : 999999;
+    const cb = b.categoryIds[0] != null ? (catOrder.get(b.categoryIds[0]) ?? 999998) : 999999;
+    if (ca !== cb) return ca - cb;
+    const so = compareSortOrder(a.productSortOrder, b.productSortOrder);
+    if (so !== 0) return so;
+    return String(a.name).localeCompare(String(b.name), 'zh-Hant');
+  };
 }
 
 /** 交易裡「套用活動」文字：`海報 Buy 2 for 400 ×1；滿800送小卡` */
@@ -98,15 +105,7 @@ export function buildLedgerModel({ dateKey, transactions, products = [], categor
     }
   }
 
-  const columns = [...colMap.values()].sort((a, b) => {
-    // 多類別的商品放在第一個類別；沒類別的排最後
-    const ca = a.categoryIds[0] != null ? (catOrder.get(a.categoryIds[0]) ?? 999998) : 999999;
-    const cb = b.categoryIds[0] != null ? (catOrder.get(b.categoryIds[0]) ?? 999998) : 999999;
-    if (ca !== cb) return ca - cb;
-    const so = compareSortOrder(a.productSortOrder, b.productSortOrder);
-    if (so !== 0) return so;
-    return String(a.name).localeCompare(String(b.name), 'zh-Hant');
-  });
+  const columns = [...colMap.values()].sort(columnComparator(catOrder));
 
   const rows = dayTxs.map((tx, idx) => {
     if (isVoided(tx)) return voidedRow(tx, idx);
@@ -364,11 +363,71 @@ export function buildSummaryModel({ dateKey, transactions, products = [], catego
   return {
     columns,
     rows,
+    txs,
     totals: {
       goodsTotal, discountTotal, todayRealTotal, preorderARefTotal, preorderBDepositTotal, onlineStoreTotal, allTotal,
       equationLhs, equationRhs, equationDiff: equationLhs - equationRhs,
       voidedCount: voidedTxs.length, voidedAmount,
       shippedByKey: shipped,
     },
+  };
+}
+
+/**
+ * 報表頁「收攤對帳」：不用開 Excel 就能點錢箱、看商品出貨
+ * → {
+ *   payments: [{ name, isCash, amount, count }]  今日現場收款（現場銷售＋預購B尾款），現金在前
+ *   cashTotal, electronicTotal, realTotal, discountTotal,
+ *   products: [{ key, name, isBundle, shipped, stock }]  今天有出貨的商品（含套組內容物、預購取件、通販）
+ *   shippedTotal
+ * }
+ * stock 是「現在」的庫存（數字，或 null＝不限）。
+ */
+export function buildCloseoutModel({ dateKey, transactions, products = [], categories = [] }) {
+  const summary = buildSummaryModel({ dateKey, transactions, products, categories });
+  const productsById = new Map(products.map((p) => [p.id, p]));
+  const catOrder = new Map(categories.map((c) => [c.id, Number.isFinite(c.sortOrder) ? c.sortOrder : 999999]));
+
+  const byMethod = new Map();
+  for (const tx of summary.txs) {
+    const kind = calcTxKind(tx);
+    if (kind !== '現場' && kind !== '預購B') continue;
+    const pm = Array.isArray(tx.payments) ? tx.payments[0] : null;
+    const name = pm?.methodName ?? '（未設定收款方式）';
+    const row = byMethod.get(name) ?? { name, isCash: !!pm?.isCash, amount: 0, count: 0 };
+    row.amount += tx.subtotal ?? 0;
+    row.count += 1;
+    byMethod.set(name, row);
+  }
+  const payments = [...byMethod.values()].sort((a, b) => (Number(b.isCash) - Number(a.isCash)) || (b.amount - a.amount));
+  const cashTotal = payments.filter((p) => p.isCash).reduce((s, p) => s + p.amount, 0);
+  const electronicTotal = payments.filter((p) => !p.isCash).reduce((s, p) => s + p.amount, 0);
+
+  const productRows = summary.columns
+    .map((c) => {
+      const p = c.productId ? productsById.get(c.productId) : null;
+      return {
+        key: c.key,
+        name: c.name,
+        isBundle: !!c.isBundle,
+        shipped: summary.totals.shippedByKey.get(c.key) ?? 0,
+        stock: typeof p?.stock === 'number' ? p.stock : null,
+        categoryIds: p?.categoryIds ?? c.categoryIds ?? [],
+        productSortOrder: p?.sortOrder,
+      };
+    })
+    .filter((r) => r.shipped > 0)
+    .sort(columnComparator(catOrder))
+    .map(({ key, name, isBundle, shipped, stock }) => ({ key, name, isBundle, shipped, stock }));
+
+  return {
+    payments,
+    cashTotal,
+    electronicTotal,
+    realTotal: summary.totals.todayRealTotal,
+    discountTotal: summary.totals.discountTotal,
+    products: productRows,
+    // 套組本身不算件數（內容物已經各自算進去），避免重複
+    shippedTotal: productRows.filter((r) => !r.isBundle).reduce((s, r) => s + r.shipped, 0),
   };
 }

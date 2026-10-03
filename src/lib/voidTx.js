@@ -16,10 +16,6 @@ export function isVoided(tx) {
   return tx?.voided === true;
 }
 
-export function activeTxs(transactions) {
-  return (transactions ?? []).filter((tx) => !isVoided(tx));
-}
-
 /**
  * 這筆交易當初扣了哪些商品各幾個（作廢時要加回去）。
  * 跟結帳扣庫存的算法一致：單賣 ＋ 套組本身 ＋ 套組內容物。

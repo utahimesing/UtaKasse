@@ -6,6 +6,7 @@ import BundlePickerModal from '../components/BundlePickerModal.jsx';
 import Toast from '../components/Toast.jsx';
 import db, { createUUID } from '../db.js';
 import { getTaipeiDateKey, getTaipeiTimeHMS } from '../lib/dateTaipei.js';
+import { pickDefaultPaymentId, quickCashOptions } from '../lib/cash.js';
 import { useToast } from '../lib/useToast.js';
 import { parsePreordersCsvText } from '../lib/csv.js';
 import { t } from '../i18n/t.js';
@@ -79,8 +80,18 @@ const styles = {
     backgroundColor: ui.white,
     fontFamily: 'inherit',
   },
+  quickCashBtn: {
+    flex: 1, minHeight: 44, padding: '0 4px', borderRadius: 10,
+    border: border.solidSm, background: ui.mint, color: ui.ink,
+    fontWeight: 800, fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+  },
+  confirmBox: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+    padding: 16, borderRadius: 12, textAlign: 'center',
+    background: ui.mint, border: border.solid, color: ui.ink,
+  },
   paymentPill: (active) => ({
-    flex: 1,
+    flex: '1 1 30%',
     minHeight: 44,
     borderRadius: 999,
     padding: '0 8px',
@@ -143,6 +154,7 @@ export default function Preorders() {
 
   const [events, setEvents] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
+  const [preorderReload, setPreorderReload] = useState(0); // +1 → 重新讀預購單
   const [searchQuery, setSearchQuery] = useState('');
 
   const [products, setProducts] = useState([]);
@@ -217,11 +229,11 @@ export default function Preorders() {
       .filter((x) => !!x?.enabled)
       .sort((a, b) => (a?.sortOrder ?? 0) - (b?.sortOrder ?? 0));
     setPaymentMethods(pms);
-    if (!pickupPaymentId && pms.length > 0) setPickupPaymentId(pms[0].id);
+    setPickupPaymentId((prev) => (prev && pms.some((m) => m.id === prev) ? prev : pickDefaultPaymentId(pms)));
 
-    const eventId = selectedEventId && evts.some((e) => e.id === selectedEventId) ? selectedEventId : null;
-    const prs = eventId ? (await db.preOrders.toArray()).filter((x) => x?.eventId === eventId) : [];
-    setPreOrders(prs);
+    // 預購單交給下面的 effect 讀：這裡的 selectedEventId 可能還是舊值（第一次開啟時是 null），
+    // 直接 setPreOrders 會在 effect 讀完之後把清單蓋成空的
+    setPreorderReload((n) => n + 1);
   }
 
   async function switchActiveEvent(eventId) {
@@ -242,11 +254,10 @@ export default function Preorders() {
   useEffect(() => {
     // 初次載入（非同步，不在 effect 內同步 setState）
     Promise.resolve().then(() => loadAll()).catch((e) => console.error(e));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // 切換場次後重新讀該場次的預購單；沒選場次就清空
+    // 切換場次或 loadAll 之後重新讀該場次的預購單；沒選場次就清空
     let alive = true;
     db.preOrders.toArray()
       .then((rows) => {
@@ -255,7 +266,7 @@ export default function Preorders() {
       })
       .catch((e) => console.error(e));
     return () => { alive = false; };
-  }, [selectedEventId]);
+  }, [selectedEventId, preorderReload]);
 
   const filteredPreOrders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -279,9 +290,8 @@ export default function Preorders() {
     setPickupCashInput('0');
     setAddOnOpen(false);
     setAddOnCart([]);
-    if (pickupPaymentId) return;
-    const first = paymentMethods[0];
-    if (first) setPickupPaymentId(first.id);
+    // 每位買家都從預設收款方式開始，避免沿用上一位的 LINE Pay
+    setPickupPaymentId(pickDefaultPaymentId(paymentMethods));
   }
 
   function closePickup() {
@@ -720,7 +730,7 @@ export default function Preorders() {
 
         {importWarnings.length > 0 ? (
           <div style={{ ...styles.card, marginBottom: 16, backgroundColor: ui.apricot }}>
-            <div style={{ fontWeight: 800, color: ui.ink }}>⚠ 警告（部分項目可能未匯入）</div>
+            <div style={{ fontWeight: 800, color: ui.ink }}>⚠ {t('preorders.importWarnings')}</div>
             <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: ui.ink, fontWeight: 600, fontSize: 12 }}>
               {importWarnings.map((w, i) => (
                 <li key={i}>{w}</li>
@@ -733,7 +743,7 @@ export default function Preorders() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
             <div style={{ fontWeight: 800, fontSize: 17 }}>{t('preorders.importTitle')}</div>
             <Button variant="secondary" size="sm" onClick={downloadPreorderTemplate}>
-              下載預購範本
+              {t('preorders.downloadTemplate')}
             </Button>
           </div>
           <input
@@ -747,7 +757,7 @@ export default function Preorders() {
             }}
           />
           <div style={{ ...styles.caption, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-            💡 提示：event_name 請填入後台顯示的場次名稱（如 CWT72_250601）。item_name 須與後台商品名稱完全一致，否則無法關聯庫存。
+            {t('preorders.csvHint')}
           </div>
         </div>
 
@@ -891,7 +901,7 @@ export default function Preorders() {
                       )}
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, padding: '2px 6px 6px 2px' }}>
-                        {products.slice(0, 12).map((p) => (
+                        {products.map((p) => (
                           <ProductCard
                             key={p.id}
                             product={p}
@@ -905,7 +915,7 @@ export default function Preorders() {
 
                   {/* 應收總額：橘色色塊＋Display 字級 */}
                   <div style={{ marginTop: 12, ...styles.card, boxShadow: shadow.sm, background: ui.orange }}>
-                    <div style={{ ...styles.caption, color: ui.ink }}>應收總額（尾款＋加購）</div>
+                    <div style={{ ...styles.caption, color: ui.ink }}>{t('preorders.totalCollect')}</div>
                     <div style={{ marginTop: 4, fontWeight: 800, fontSize: 40, letterSpacing: '-0.02em', lineHeight: 1, color: ui.ink, textAlign: 'right', wordBreak: 'break-all' }}>
                       NT${expectedTotalCollect}
                     </div>
@@ -913,29 +923,34 @@ export default function Preorders() {
 
                   <div style={{ marginTop: 12 }}>
                     <div style={{ fontWeight: 800, color: ui.ink }}>{t('preorders.paymentTitle')}</div>
-                    <div style={{ display: 'flex', gap: 10, marginTop: 8, padding: '0 4px 4px 0' }}>
-                      {paymentMethods
-                        .filter((m) => m.enabled)
-                        .slice(0, 3)
-                        .map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            style={styles.paymentPill(pickupPaymentId === m.id)}
-                            onClick={() => {
-                              setPickupPaymentId(m.id);
-                              if (m.isCash) setPickupCashInput('0');
-                            }}
-                          >
-                            {m.name}
-                          </button>
-                        ))}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, padding: '0 4px 4px 0' }}>
+                      {paymentMethods.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          style={styles.paymentPill(pickupPaymentId === m.id)}
+                          onClick={() => {
+                            setPickupPaymentId(m.id);
+                            setPickupCashInput('0');
+                          }}
+                        >
+                          {m.name}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
+                  {paymentForPickup?.isCash ? (
                   <div style={{ marginTop: 12 }}>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                      {quickCashOptions(expectedTotalCollect).map((amount, i) => (
+                        <button key={amount} type="button" style={styles.quickCashBtn} onClick={() => setPickupCashInput(String(amount))}>
+                          {i === 0 ? t('sales.exact') : amount}
+                        </button>
+                      ))}
+                    </div>
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ ...styles.caption, marginBottom: 6 }}>實收金額</div>
+                      <div style={{ ...styles.caption, marginBottom: 6 }}>{t('preorders.receivedLabel')}</div>
                       <input
                         type="number"
                         inputMode="numeric"
@@ -955,7 +970,6 @@ export default function Preorders() {
                     </div>
                     <div style={{ padding: '0 4px 4px 0' }}>
                       <NumpadDigits
-                        disabled={false}
                         onDigit={(n) => pressDigit(n)}
                         onDoubleZero={pressDoubleZero}
                         onBackspace={pressBackspace}
@@ -971,9 +985,17 @@ export default function Preorders() {
                         color: ui.ink,
                       }}
                     >
-                      {cashInsufficient ? '⚠ ' : ''}{`${getString('S9')}${changeAmount}`}
+                      {cashInsufficient ? `⚠ ${getString('S11')}` : `${getString('S9')}${changeAmount}`}
                     </div>
                   </div>
+                  ) : (
+                    <div style={{ ...styles.confirmBox, marginTop: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{t('sales.confirmPaidTitle')}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800 }}>{paymentForPickup?.name ?? t('sales.noPayment')}</div>
+                      <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1 }}>NT${expectedTotalCollect}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: ui.muted }}>{t('sales.confirmPaidHint')}</div>
+                    </div>
+                  )}
 
                   <button
                     type="button"

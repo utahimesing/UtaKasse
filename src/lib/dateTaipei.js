@@ -33,7 +33,7 @@ export function getTaipeiNextMidnightMs(now = new Date()) {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour12: false,
+    hourCycle: 'h23', // 部分瀏覽器 hour12:false 會把午夜寫成 24:00
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',

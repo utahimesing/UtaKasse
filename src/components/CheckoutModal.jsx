@@ -5,6 +5,7 @@ import { surface, ui, border, shadow, checkoutCta } from '../lib/uiPalette.js';
 import { t } from '../i18n/t.js';
 import { getString } from '../lib/strings.js';
 import { describeComponents, isBundleLine } from '../lib/cart.js';
+import { quickCashOptions } from '../lib/cash.js';
 
 const S = {
   // 遮罩：實色半透明，不模糊
@@ -72,19 +73,24 @@ const S = {
     borderRadius: 8, cursor: 'pointer', fontSize: 12,
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
   },
-  // 活動提示：杏色底＋黑框＋微旋轉（有目的的不對稱）
-  bonusTag: {
-    display: 'inline-block',
-    fontSize: 12,
-    fontWeight: 700,
-    color: ui.ink,
-    background: ui.apricot,
-    border: border.solidSm,
-    borderRadius: 6,
-    padding: '4px 8px',
-    marginBottom: 6,
-    transform: 'rotate(-3deg)',
+  // 贈品提醒：整條杏色色帶、大字，結帳前一定看得到
+  bonusBanner: {
+    display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+    padding: '8px 12px', marginBottom: 8, borderRadius: 10,
+    background: ui.apricot, border: border.solid, color: ui.ink,
     animation: 'bonusReveal 220ms ease-out both',
+  },
+  quickCashBtn: {
+    flex: 1, minHeight: 44, padding: '0 4px', borderRadius: 8,
+    border: border.solidSm, background: ui.mint, color: ui.ink,
+    fontWeight: 800, fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+  },
+  // 電子支付：不用找零，改成「請確認已收款」
+  confirmBox: {
+    height: '100%', boxSizing: 'border-box', minHeight: 150,
+    display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 6,
+    padding: 12, borderRadius: 10, textAlign: 'center',
+    background: ui.mint, border: border.solid, color: ui.ink,
   },
   bundleBadge: {
     display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '1px 6px',
@@ -105,20 +111,25 @@ const receiptValue = (variant) => {
 };
 
 export default function CheckoutModal({
-  cart, totals, totalAmount, getMaxQty, paymentMethods, selectedPaymentId,
-  setSelectedPaymentId, setCashInput, cashValue, changeAmount,
+  cart, totals, totalAmount, getMaxQty, paymentMethods, selectedPayment,
+  onSelectPayment, onQuickCash, cashValue, changeAmount,
   checkoutPhase, onCheckout, checkoutDisabled, cashInsufficient,
   bonusesTriggered, onInc, onDec, onRemove,
   pressDigit, pressDoubleZero, pressBackspace, onClose,
 }) {
   const discounts = totals?.discounts ?? [];
   const hasDiscount = (totals?.totalDiscount ?? 0) > 0;
+  const isCash = !!selectedPayment?.isCash;
+  // 電子支付只顯示應收；現金才有實收／找零（找零不顯示負數）
   const receiptRows = [
     ...(hasDiscount ? [{ label: t('sales.gross'), value: `NT$${totals.grossAmount}`, v: 'gross' }] : []),
     { label: t('sales.due'), value: `NT$${totalAmount}`,  v: 'due'    },
-    { label: t('sales.received'), value: `NT$${cashValue}`,    v: 'recv'   },
-    { label: t('sales.change'), value: `NT$${changeAmount}`, v: 'change' },
+    ...(isCash ? [
+      { label: t('sales.received'), value: `NT$${cashValue}`, v: 'recv' },
+      { label: t('sales.change'), value: changeAmount >= 0 ? `NT$${changeAmount}` : '—', v: 'change' },
+    ] : []),
   ];
+  const quickCash = isCash ? quickCashOptions(totalAmount) : [];
 
   return (
     <>
@@ -126,8 +137,8 @@ export default function CheckoutModal({
       <div style={S.panel}>
         <style>{`
           @keyframes bonusReveal {
-            0% { opacity: 0; transform: translateY(4px) rotate(-3deg); }
-            100% { opacity: 1; transform: translateY(0) rotate(-3deg); }
+            0% { opacity: 0; transform: translateY(4px); }
+            100% { opacity: 1; transform: translateY(0); }
           }
         `}</style>
         <div style={S.header}>
@@ -189,17 +200,19 @@ export default function CheckoutModal({
         </div>
 
         <div style={S.footer}>
+          {/* 贈品提醒（整條色帶） */}
+          {bonusesTriggered.length > 0 ? (
+            <div style={S.bonusBanner} role="status">
+              <span style={{ fontSize: 14, fontWeight: 800 }}>{t('sales.bonusShort')}</span>
+              <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.3 }}>
+                {bonusesTriggered.map((b) => b.bonusText ?? b.ruleName).join('、')}
+              </span>
+            </div>
+          ) : null}
+
           {/* 收據區 */}
           <div style={{ display: 'flex', padding: '4px 0 8px', gap: 0 }}>
-            {bonusesTriggered.length > 0 && (
-              <div style={{ flex: 1, paddingRight: 12, borderRight: `2px solid ${ui.ink}` }}>
-                <div style={{ fontSize: 11, color: ui.ink, fontWeight: 800, marginBottom: 6 }}>{t('sales.bonusShort')}</div>
-                {bonusesTriggered.map((b) => (
-                  <div key={b.ruleId} style={S.bonusTag}>{b.bonusText}</div>
-                ))}
-              </div>
-            )}
-            <div style={{ minWidth: 150, flex: bonusesTriggered.length > 0 ? 'none' : 1, paddingLeft: bonusesTriggered.length > 0 ? 12 : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               {receiptRows.map(({ label, value, v }) => (
                 <div key={v}>
                   {v === 'change' && <div style={S.receiptLine} />}
@@ -215,15 +228,33 @@ export default function CheckoutModal({
           {/* 付款 + 數字盤 */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {paymentMethods.filter((m) => m.enabled).map((m) => (
-                <button key={m.id} type="button" style={S.paymentPill(selectedPaymentId === m.id)}
-                  onClick={() => { setSelectedPaymentId(m.id); if (m.isCash) setCashInput('0'); }}>
+              {paymentMethods.map((m) => (
+                <button key={m.id} type="button" style={S.paymentPill(selectedPayment?.id === m.id)}
+                  onClick={() => onSelectPayment(m)}>
                   {m.name}
                 </button>
               ))}
             </div>
-            <div style={{ flex: 1 }}>
-              <NumpadDigits compact onDigit={pressDigit} onDoubleZero={pressDoubleZero} onBackspace={pressBackspace} disabled={false} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {isCash ? (
+                <>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    {quickCash.map((amount, i) => (
+                      <button key={amount} type="button" style={S.quickCashBtn} onClick={() => onQuickCash(amount)}>
+                        {i === 0 ? t('sales.exact') : amount}
+                      </button>
+                    ))}
+                  </div>
+                  <NumpadDigits compact onDigit={pressDigit} onDoubleZero={pressDoubleZero} onBackspace={pressBackspace} />
+                </>
+              ) : (
+                <div style={S.confirmBox}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{t('sales.confirmPaidTitle')}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800 }}>{selectedPayment?.name ?? t('sales.noPayment')}</div>
+                  <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1 }}>NT${totalAmount}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: ui.muted }}>{t('sales.confirmPaidHint')}</div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -239,7 +270,7 @@ export default function CheckoutModal({
           >
             {checkoutPhase === 'done'
               ? t('sales.checkoutDone')
-              : cashInsufficient ? getString('S11') : t('sales.checkout')}
+              : cashInsufficient ? getString('S11') : isCash ? t('sales.checkout') : t('sales.checkoutPaid')}
           </Button>
         </div>
       </div>

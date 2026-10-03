@@ -183,6 +183,14 @@ export function validateBackupPayload(data) {
     ensureString(event.date, `events[${idx}].date`, { max: 32 });
     ensureString(event.status, `events[${idx}].status`, { max: 32 });
     ensureNumber(event.createdAt, `events[${idx}].createdAt`);
+    // v1.1.2 零用金（選填）：{ 'YYYY-MM-DD': 金額 }
+    if (typeof event.cashFloats !== 'undefined') {
+      if (!isPlainObject(event.cashFloats)) throw new Error(`備份格式錯誤：events[${idx}].cashFloats 必須是物件`);
+      Object.entries(event.cashFloats).forEach(([k, v]) => {
+        ensureNumber(v, `events[${idx}].cashFloats.${k}`);
+        if (v < 0) throw new Error(`備份格式錯誤：events[${idx}].cashFloats.${k} 必須 ≥ 0`);
+      });
+    }
   });
 
   (data.categories ?? []).forEach((category, idx) => {
@@ -241,6 +249,17 @@ export function validateBackupPayload(data) {
 }
 
 export default db;
+
+// ===== 零用金（v1.1.2）：每個場次、每一天各一筆，報表頁算「錢箱應有」用 =====
+export async function setEventCashFloat(eventId, dateKey, amount) {
+  const n = Math.max(0, Math.floor(Number(amount) || 0));
+  await db.transaction('rw', db.events, async () => {
+    const evt = await db.events.get(eventId);
+    if (!evt) throw new Error('找不到場次');
+    await db.events.update(eventId, { cashFloats: { ...(evt.cashFloats ?? {}), [dateKey]: n } });
+  });
+  return n;
+}
 
 // ===== 作廢交易（v1.1.1）：保留紀錄、加回庫存、預購取件改回未取件 =====
 // 全部包在同一個 transaction：任何一步失敗就整筆回滾

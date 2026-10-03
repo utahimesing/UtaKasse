@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import db, { voidTransaction } from '../db.js';
+import db, { voidTransaction, setEventCashFloat } from '../db.js';
 import { getTaipeiDateKey } from '../lib/dateTaipei.js';
 import { useToast } from '../lib/useToast.js';
 import { t, tf } from '../i18n/t.js';
@@ -7,6 +7,8 @@ import { isVoided } from '../lib/voidTx.js';
 import Toast from '../components/Toast.jsx';
 import Button from '../components/Button.jsx';
 import TxDetailList from '../components/TxDetailList.jsx';
+import { CashCard, ProductShippedCard } from '../components/CloseoutCards.jsx';
+import { buildCloseoutModel } from '../lib/reportModel.js';
 import {
   buildRevenueCsvForEventDate,
   downloadCsvFiles,
@@ -145,6 +147,24 @@ export default function Reports() {
     [selectedDateKey, txsForEvent],
   );
 
+  const closeout = useMemo(
+    () => buildCloseoutModel({ dateKey: selectedDateKey, transactions: txsForEvent, products, categories }),
+    [selectedDateKey, txsForEvent, products, categories],
+  );
+  const cashFloat = selectedEvent?.cashFloats?.[selectedDateKey] ?? null;
+
+  async function onSaveCashFloat(amount) {
+    if (!selectedEventId || selectedEventIsArchived) return;
+    try {
+      await setEventCashFloat(selectedEventId, selectedDateKey, amount);
+      toast.show(t('closeout.floatSaved'), 'success');
+      await loadData();
+    } catch (e) {
+      console.error(e);
+      toast.show(`${t('closeout.floatFailed')}：${e instanceof Error ? e.message : '未知錯誤'}`, 'error');
+    }
+  }
+
   const canExport = txsForSelected.length > 0 && !exporting;
 
   async function onExportXlsx() {
@@ -250,6 +270,20 @@ export default function Reports() {
               <div style={styles.metricValue}>NT${preorderBTotal}</div>
             </div>
           </div>
+        </div>
+
+        {/* 收攤對帳：收款方式＋錢箱應有、商品出貨 */}
+        <div style={{ marginTop: 20 }}>
+          <CashCard
+            key={`${selectedEventId ?? ''}|${selectedDateKey}|${cashFloat ?? ''}`}
+            model={closeout}
+            cashFloat={cashFloat}
+            onSaveCashFloat={onSaveCashFloat}
+            readOnly={!selectedEventId || selectedEventIsArchived}
+          />
+        </div>
+        <div style={{ marginTop: 20 }}>
+          <ProductShippedCard model={closeout} />
         </div>
 
         {/* 本日交易明細（可收合） */}
