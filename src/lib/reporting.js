@@ -1,6 +1,13 @@
-function escapeCsvCell(v) {
-  const s = String(v ?? '');
-  if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+import { isVoided } from './voidTx.js';
+
+// 用 Excel／Google 試算表打開 CSV 時，開頭是 = + - @（或 tab、換行）的文字會被當成公式執行（CSV injection），
+// 例如買家暱稱填 =HYPERLINK(...)。文字前面加 ' 讓它保持純文字；數字不受影響。
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+export function escapeCsvCell(v) {
+  let s = String(v ?? '');
+  if (typeof v === 'string' && FORMULA_PREFIX.test(s)) s = `'${s}`;
+  if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
@@ -51,7 +58,7 @@ function dateKeyToYYYYMMDD(dateKey) {
 
 export function buildTransactionsCsvText({ dateKey, transactions }) {
   const txs = (transactions ?? [])
-    .filter((t) => t.date === dateKey)
+    .filter((t) => t.date === dateKey && !isVoided(t)) // 作廢的不計入
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 
   const productNames = Array.from(
@@ -101,7 +108,7 @@ export function buildTransactionsCsvText({ dateKey, transactions }) {
 
 export function buildSummaryCsvText({ dateKey, transactions }) {
   const txs = (transactions ?? [])
-    .filter((t) => t.date === dateKey)
+    .filter((t) => t.date === dateKey && !isVoided(t)) // 作廢的不計入
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 
   const productNames = Array.from(
@@ -313,7 +320,7 @@ export function buildSummaryCsvText({ dateKey, transactions }) {
       '',
     ]),
   );
-  lines.push(fixedRow([`= 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]));
+  lines.push(fixedRow([`＝ 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]));
 
   return lines.join('\n');
 }
@@ -339,7 +346,9 @@ export function buildRevenueCsvForEventDate({ eventName, dateKey, transactions }
  * Reports 頁面「本日營收摘要」用（完全統一計算邏輯）
  */
 export function calcTodayRevenueSummaryForEventDate({ dateKey, transactions }) {
-  const txs = (transactions ?? []).filter((t) => t.date === dateKey);
+  const dayTxs = (transactions ?? []).filter((t) => t.date === dateKey);
+  const txs = dayTxs.filter((t) => !isVoided(t)); // 作廢的不計入
+  const voidedCount = dayTxs.length - txs.length;
 
   const saleTxs = txs.filter((t) => calcTxKind(t) === '現場');
   const preorderATxs = txs.filter((t) => calcTxKind(t) === '預購A');
@@ -364,6 +373,7 @@ export function calcTodayRevenueSummaryForEventDate({ dateKey, transactions }) {
     onlineStoreTotal,
     onlineStoreCount,
     allTotal,
+    voidedCount,
   };
 }
 

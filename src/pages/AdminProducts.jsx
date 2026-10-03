@@ -319,7 +319,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
 
   async function clearAllDataAndToast() {
     const confirmMessages = [
-      '確定清空所有數據？',
+      getString('A6'),
       '你真的要確定喔？',
       '你有問過歌姬了嗎？',
       '真的確定歌姬說可以刪掉了嗎？',
@@ -344,7 +344,7 @@ export default function AdminProducts({ products = [], refreshProducts }) {
     });
 
     await ensureSeedData();
-    toast.show(getString('A6'));
+    toast.show(t('admin.clearedAll'), 'success');
     await refreshProducts?.();
     await loadAll();
   }
@@ -1814,12 +1814,12 @@ function AddCategoryBox({ categories, onCreated, onDeleted }) {
   const [name, setName] = useState('');
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={styles.label}>新增類別</div>
+      <div style={styles.label}>{t('admin.addCategory')}</div>
       <div style={{ display: 'flex', gap: 16 }}>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="輸入類別名稱"
+          placeholder={t('admin.categoryPlaceholder')}
           style={{
             ...styles.input,
             flex: 1,

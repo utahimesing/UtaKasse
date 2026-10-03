@@ -5,6 +5,7 @@ import {
   migrateBackupPayload,
   migrateBonusRuleV3toV4,
 } from './lib/migrations.js';
+import { isVoided, txStockUsage, normalizeVoidReason } from './lib/voidTx.js';
 
 /**
  * Dexie database (IndexedDB)
@@ -182,6 +183,14 @@ export function validateBackupPayload(data) {
     ensureString(event.date, `events[${idx}].date`, { max: 32 });
     ensureString(event.status, `events[${idx}].status`, { max: 32 });
     ensureNumber(event.createdAt, `events[${idx}].createdAt`);
+    // v1.1.2 零用金（選填）：{ 'YYYY-MM-DD': 金額 }
+    if (typeof event.cashFloats !== 'undefined') {
+      if (!isPlainObject(event.cashFloats)) throw new Error(`備份格式錯誤：events[${idx}].cashFloats 必須是物件`);
+      Object.entries(event.cashFloats).forEach(([k, v]) => {
+        ensureNumber(v, `events[${idx}].cashFloats.${k}`);
+        if (v < 0) throw new Error(`備份格式錯誤：events[${idx}].cashFloats.${k} 必須 ≥ 0`);
+      });
+    }
   });
 
   (data.categories ?? []).forEach((category, idx) => {
@@ -223,6 +232,14 @@ export function validateBackupPayload(data) {
     }
   });
 
+  // v1.1.1 作廢欄位（選填）
+  (data.transactions ?? []).forEach((tx, idx) => {
+    if (typeof tx.voided !== 'undefined') ensureBoolean(tx.voided, `transactions[${idx}].voided`);
+    if (tx.voided === true && tx.voidReason != null) {
+      ensureString(tx.voidReason, `transactions[${idx}].voidReason`, { max: 200, allowEmpty: true });
+    }
+  });
+
   (data.paymentMethods ?? []).forEach((pm, idx) => {
     ensureString(pm.name, `paymentMethods[${idx}].name`, { max: 80 });
     ensureBoolean(pm.enabled, `paymentMethods[${idx}].enabled`);
@@ -232,6 +249,49 @@ export function validateBackupPayload(data) {
 }
 
 export default db;
+
+// ===== 零用金（v1.1.2）：每個場次、每一天各一筆，報表頁算「錢箱應有」用 =====
+export async function setEventCashFloat(eventId, dateKey, amount) {
+  const n = Math.max(0, Math.floor(Number(amount) || 0));
+  await db.transaction('rw', db.events, async () => {
+    const evt = await db.events.get(eventId);
+    if (!evt) throw new Error('找不到場次');
+    await db.events.update(eventId, { cashFloats: { ...(evt.cashFloats ?? {}), [dateKey]: n } });
+  });
+  return n;
+}
+
+// ===== 作廢交易（v1.1.1）：保留紀錄、加回庫存、預購取件改回未取件 =====
+// 全部包在同一個 transaction：任何一步失敗就整筆回滾
+export async function voidTransaction(txId, { reason = '' } = {}) {
+  return db.transaction('rw', db.transactions, db.products, db.preOrders, async () => {
+    const tx = await db.transactions.get(txId);
+    if (!tx) throw new Error('找不到這筆交易');
+    if (isVoided(tx)) throw new Error('這筆交易已經作廢過了');
+
+    for (const [productId, qty] of txStockUsage(tx)) {
+      const prod = await db.products.get(productId);
+      if (!prod || typeof prod.stock !== 'number') continue; // 已刪除或不限庫存
+      await db.products.update(productId, { stock: prod.stock + qty });
+    }
+
+    await db.transactions.update(txId, {
+      voided: true,
+      voidedAt: Date.now(),
+      voidReason: normalizeVoidReason(reason),
+    });
+
+    let preorderReset = false;
+    if (tx.type === 'preorder_pickup' && tx.preorderId) {
+      const po = await db.preOrders.get(tx.preorderId);
+      if (po && po.status === 'collected' && (!po.transactionId || po.transactionId === tx.id)) {
+        await db.preOrders.update(po.id, { status: 'pending', collectedAt: null, transactionId: null });
+        preorderReset = true;
+      }
+    }
+    return { preorderReset };
+  });
+}
 // ===== 備份：讀出所有資料 =====
 export async function exportAllData() {
   const [

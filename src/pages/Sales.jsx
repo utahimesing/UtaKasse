@@ -11,9 +11,10 @@ import {
   maxQtyForLine, qtyOfProductInCart, usageByProduct, lineToTxItem,
 } from '../lib/cart.js';
 import { getTaipeiDateKey, getTaipeiTimeHMS } from '../lib/dateTaipei.js';
+import { pickDefaultPaymentId } from '../lib/cash.js';
 import { useToast } from '../lib/useToast.js';
 import { getString } from '../lib/strings.js';
-import { t } from '../i18n/t.js';
+import { t, tf } from '../i18n/t.js';
 import { ui, border, shadow, checkoutCta } from '../lib/uiPalette.js';
 
 const styles = {
@@ -81,6 +82,17 @@ const styles = {
     boxShadow: checkoutCta.shadow,
     cursor: 'pointer', letterSpacing: '-0.01em',
   },
+  // 結帳後的贈品提醒：杏色大色塊，按「已送」才收起（或開始點下一位客人的商品）
+  giftBanner: {
+    display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+    padding: '10px 12px', borderRadius: 12,
+    background: ui.apricot, border: border.solid, boxShadow: shadow.sm, color: ui.ink,
+  },
+  giftDoneBtn: {
+    flex: '0 0 auto', minHeight: 44, padding: '0 14px', borderRadius: 10,
+    border: border.solid, background: ui.white, color: ui.ink,
+    fontWeight: 800, fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+  },
 };
 
 function isUncategorizedCategory(category) {
@@ -134,8 +146,9 @@ export default function Sales({ products = [], categories = [], refreshProducts 
   const [activeEventName, setActiveEventName] = useState('');
 
   const [cashInput, setCashInput] = useState('0');
-  const [checkoutPhase, setCheckoutPhase] = useState('idle'); // idle | done
+  const [checkoutPhase, setCheckoutPhase] = useState('idle'); // idle | processing | done
   const [showCheckout, setShowCheckout] = useState(false);
+  const [giftReminder, setGiftReminder] = useState(null); // { receiptNo, gifts: string[] }
   const toast = useToast();
 
   useEffect(() => {
@@ -150,8 +163,8 @@ export default function Sales({ products = [], categories = [], refreshProducts 
         .filter((m) => !!m.enabled)
         .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
       setPaymentMethods(pms);
-      // 付款方式清單變動時，選到的付款方式若已不存在就退回第一個
-      setSelectedPaymentId((prev) => (prev && pms.some((m) => m.id === prev) ? prev : (pms[0]?.id ?? null)));
+      // 付款方式清單變動時，選到的付款方式若已不存在就退回預設
+      setSelectedPaymentId((prev) => (prev && pms.some((m) => m.id === prev) ? prev : pickDefaultPaymentId(pms)));
 
       const allEvents = await db.events.toArray();
       const activeEvent = allEvents.find((e) => e.status === 'active' && !e.archived) ?? null;
@@ -284,7 +297,17 @@ export default function Sales({ products = [], categories = [], refreshProducts 
     setCashInput((prev) => (prev === '0' ? '0' : `${prev}00`));
   }
 
+  function setQuickCash(amount) {
+    setCashInput(String(amount));
+  }
+
+  function selectPayment(method) {
+    setSelectedPaymentId(method.id);
+    setCashInput('0');
+  }
+
   function addToCart(product) {
+    setGiftReminder(null); // 開始點下一位客人 → 收起上一筆的贈品提醒
     if ((product.type ?? 'single') === 'bundle') {
       setBundlePicking(product);
       return;
@@ -315,8 +338,7 @@ export default function Sales({ products = [], categories = [], refreshProducts 
 
   function removeFromCart(lineId) {
     setCart((prev) => removeLine(prev, lineId));
-    // Trash click => Toast A1
-    toast.show(getString('A1'));
+    toast.show(t('sales.removed'));
   }
 
   const getMaxQty = useCallback((line) => maxQtyForLine(line, cart, getStock), [cart, getStock]);
@@ -392,7 +414,11 @@ export default function Sales({ products = [], categories = [], refreshProducts 
       }
     }
 
-    setCheckoutPhase('done');
+    setCheckoutPhase('processing');
+
+    // 結帳成功後畫面會清空，先把要提醒的東西記下來
+    const change = selectedPayment?.isCash ? changeAmount : 0;
+    const gifts = bonusesTriggered.map((b) => b.bonusText ?? b.ruleName).filter(Boolean);
 
     try {
       const receiptNo = await commitSale();
@@ -400,15 +426,19 @@ export default function Sales({ products = [], categories = [], refreshProducts 
         setCheckoutPhase('idle');
         return;
       }
+      setCheckoutPhase('done');
       await refreshProducts?.();
       // 0.8s animation window
       setTimeout(() => {
         setCart([]);
         setCashInput('0');
         setCheckoutPhase('idle');
+        // 每筆結完回到預設收款方式（通常是現金），避免沿用上一位客人的 LINE Pay
+        setSelectedPaymentId(pickDefaultPaymentId(paymentMethods));
         topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        // Checkout success => Toast A2 + receipt number
-        toast.show(`${getString('A2')}${receiptNo}`, 'success');
+        const doneMsg = `${getString('A2')}${receiptNo}`;
+        toast.show(change > 0 ? `${doneMsg}｜${tf('sales.toastChange', { amount: change })}` : doneMsg, 'success');
+        setGiftReminder(gifts.length > 0 ? { receiptNo, gifts } : null);
         setShowCheckout(false);
       }, 800);
     } catch (e) {
@@ -432,6 +462,22 @@ export default function Sales({ products = [], categories = [], refreshProducts 
       <div style={styles.eventTag(!!activeEventName)}>
         {activeEventName ? `📍 ${activeEventName}` : t('sales.noEventTag')}
       </div>
+
+      {giftReminder ? (
+        <div style={styles.giftBanner} role="alert">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>
+              {tf('sales.giftReminderTitle', { no: giftReminder.receiptNo })}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.35, marginTop: 2, wordBreak: 'break-word' }}>
+              {giftReminder.gifts.join('、')}
+            </div>
+          </div>
+          <button type="button" style={styles.giftDoneBtn} onClick={() => setGiftReminder(null)}>
+            {t('sales.giftDone')}
+          </button>
+        </div>
+      ) : null}
 
       <div style={styles.categoryRow}>
         {categoryTabs.map((c) => (
@@ -511,9 +557,9 @@ export default function Sales({ products = [], categories = [], refreshProducts 
           totalAmount={totalAmount}
           getMaxQty={getMaxQty}
           paymentMethods={paymentMethods}
-          selectedPaymentId={selectedPaymentId}
-          setSelectedPaymentId={setSelectedPaymentId}
-          setCashInput={setCashInput}
+          selectedPayment={selectedPayment}
+          onSelectPayment={selectPayment}
+          onQuickCash={setQuickCash}
           cashValue={cashValue}
           changeAmount={changeAmount}
           checkoutPhase={checkoutPhase}
