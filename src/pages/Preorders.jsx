@@ -12,6 +12,7 @@ import { parsePreordersCsvText } from '../lib/csv.js';
 import { t } from '../i18n/t.js';
 import { getString } from '../lib/strings.js';
 import { readCsvFileWithEncoding, withBom } from '../lib/csvImport.js';
+import { escapeCsvCell } from '../lib/reporting.js';
 import { calcCartTotals } from '../lib/promo.js';
 import {
   addLine, setLineQty, removeLine, makeSingleLine, makeBundleLine,
@@ -625,7 +626,7 @@ export default function Preorders() {
 
   function downloadPreorderTemplate() {
     const header = ['event_name', 'order_id', 'buyer_name', 'phone_last5', 'item_name', 'item_qty', 'unit_price', 'total_price', 'paid_amount'];
-    const sampleEvent = String(selectedEvent?.name ?? '請填入場次名稱，例如CWT72_250601');
+    const sampleEvent = escapeCsvCell(String(selectedEvent?.name ?? '請填入場次名稱，例如CWT72_250601'));
     const sample = [
       `${sampleEvent},A0001,範例買家1,00001,範例商品1,1,100,100,100`,
       `${sampleEvent},A0002,範例買家2,00002,範例商品2,2,300,600,300`,

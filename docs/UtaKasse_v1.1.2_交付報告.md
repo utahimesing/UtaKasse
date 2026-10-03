@@ -1,7 +1,7 @@
 # UtaKasse v1.1.2 交付報告
 
 > 日期：2026-10-03 ｜ 分支：`release/v1.1.2`（疊在 `release/v1.1.1` 上，要先合併 v1.1.1）
-> 主題：結帳防呆、報表頁直接對帳、清理死碼
+> 主題：結帳防呆、報表頁直接對帳、清理死碼、資安加強
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 項目 | 結果 |
 |---|---|
-| `npm test`（vitest） | 6 個檔案、74 個測試全部通過（新增 `closeout.test.js` 13 個） |
+| `npm test`（vitest） | 7 個檔案、79 個測試全部通過（新增 `closeout.test.js` 13 個、`security.test.js` 5 個） |
 | `npm run lint` | 0 error、0 warning |
 | `npm run build` | 成功 |
 | `npm audit` | 0 vulnerabilities |
@@ -80,7 +80,42 @@
 
 ---
 
-## 6. 驗收（瀏覽器實測，手機寬度 375px）
+## 6. 資安檢查與加強
+
+### 檢查結果：沒有外洩
+| 項目 | 結果 |
+|---|---|
+| git 全部歷史（所有分支）搜尋 API key／token／私鑰（Google、GitHub、OpenAI／Anthropic、AWS、Slack、Netlify 等格式） | 0 筆 |
+| `.env` | 只有 Google client ID（本來就是公開的），被 git 忽略、從未上傳 |
+| git remote 網址 | 沒有夾帶帳密，使用 Windows 認證管理員 |
+| build 產物 | 只有 client ID，沒有 client secret |
+| Google 雲端備份 | 權限只有 `drive.file`（只看得到 App 自己建的檔案）；token 只存在記憶體 |
+| XSS（innerHTML／eval 等） | 0 處；外部連結都有 `rel="noopener noreferrer"` |
+| 備份還原 | 先驗證格式再寫入 |
+| 套件 | `npm audit` 0 個漏洞；SheetJS 有 integrity 雜湊 |
+
+### 這次修正
+| 問題 | 修正 |
+|---|---|
+| **舊格式 CSV 匯出會被塞 Excel 公式**（例如預購買家暱稱填 `=HYPERLINK(...)`，用 Excel 打開會變成可點的釣魚連結） | 開頭是 `= + - @`、tab、換行的文字前面加 `'`，一律當純文字；數字（含負數）不受影響。預購範本下載的場次名稱也套用。Excel 報表（.xlsx）原本就安全，加測試確認不會產生公式 |
+| SUMMARY 的「= 現場實收 …」說明列在 CSV 裡被 Excel 當公式，顯示 `#NAME?` | 改成全形「＝」 |
+| **網站沒有安全標頭** | 新增 `public/_headers`（Netlify 自動套用）：CSP 只允許 Google 登入／Drive／字型與 https 商品圖、禁止被嵌入（防點擊劫持）、nosniff、Referrer-Policy、Permissions-Policy、COOP（保留 Google 登入彈窗） |
+| 根目錄有一張沒用到的截圖 `messageImage_1777470995831.jpg` | 刪除（內容是場次下拉選單，沒有個資） |
+
+### CSP 實測（用本機伺服器套用同一份標頭）
+- App 正常顯示、四個分頁 0 次被擋；Google 登入程式、DM Sans 字型、離線快取、Excel 匯出模組都正常載入
+- Google Drive API 連得到（未登入回 403）
+- 連到不明網站（example.com）被擋 → 就算未來有漏洞，資料也送不出去
+- 把網站放進 iframe 被擋
+
+### 需要你自己確認／注意
+- **Google Cloud Console**：OAuth 用戶端的「已授權的 JavaScript 來源」只留 Netlify 網址和 `localhost`
+- **手機要設螢幕鎖**：買家暱稱、電話／匯款末五碼存在手機瀏覽器裡，沒有加密，也沒有 App 密碼
+- 你的 Email `utaforsm@gmail.com` 是刻意公開的聯絡信箱（SECURITY.md、隱私權政策、commit 作者）。不想再增加曝光的話，之後 commit 可改用 GitHub noreply 信箱
+
+---
+
+## 7. 驗收（瀏覽器實測，手機寬度 375px）
 
 | # | 項目 | 結果 |
 |---|---|---|
@@ -97,7 +132,7 @@
 
 ---
 
-## 7. 部署
+## 8. 部署
 
 1. 先合併 `release/v1.1.1`，再合併 `release/v1.1.2`（或直接合併 v1.1.2，裡面已包含 v1.1.1）。
 2. 把 `docs/utakasse-netlify-deploy-v1.1.2.zip` 拖到 Netlify。

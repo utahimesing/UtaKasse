@@ -343,7 +343,7 @@ export function buildSummaryModel({ dateKey, transactions, products = [], catego
   rows.push(['通販回填金額（賣貨便等平台，場外收款）', '', '', ...blank(), onlineStoreTotal, '', `（筆數 ${onlineTxs.length}）`]);
   rows.push(['▸ 綜合統計']);
   rows.push(['所有管道總銷售金額（含場外）', '', '', ...blank(), allTotal, '', '']);
-  rows.push([`= 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]);
+  rows.push([`＝ 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]);
   rows.push(['▸ 對帳等式']);
   rows.push(['Σ 各商品金額 − 活動折抵', '', '', ...blank(), equationLhs, '', '']);
   rows.push(['所有管道總銷售金額 + 預購B訂金（場外已收）', '', '', ...blank(), equationRhs, '', '']);

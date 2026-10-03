@@ -1,8 +1,13 @@
 import { isVoided } from './voidTx.js';
 
-function escapeCsvCell(v) {
-  const s = String(v ?? '');
-  if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+// 用 Excel／Google 試算表打開 CSV 時，開頭是 = + - @（或 tab、換行）的文字會被當成公式執行（CSV injection），
+// 例如買家暱稱填 =HYPERLINK(...)。文字前面加 ' 讓它保持純文字；數字不受影響。
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+export function escapeCsvCell(v) {
+  let s = String(v ?? '');
+  if (typeof v === 'string' && FORMULA_PREFIX.test(s)) s = `'${s}`;
+  if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
@@ -315,7 +320,7 @@ export function buildSummaryCsvText({ dateKey, transactions }) {
       '',
     ]),
   );
-  lines.push(fixedRow([`= 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]));
+  lines.push(fixedRow([`＝ 現場實收 NT$${todayRealTotal} + 預購場外已付 NT$${preorderARefTotal} + 通販 NT$${onlineStoreTotal}`]));
 
   return lines.join('\n');
 }
